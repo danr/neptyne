@@ -127,22 +127,28 @@ def kernel():
                 if part:
                     self.executing(part)
                     msg_id = kc.execute(part)
-                    msg = kc.get_shell_msg()
+                    cancel = False
+                    @wait_idle
+                    def _(msg):
+                        if 'data' in msg:
+                            # png and html can be sent here inline
+                            # pprint(msg)
+                            data = msg['data']['text/plain']
+                            self.text(data)
+                        elif 'ename' in msg:
+                            nonlocal cancel
+                            cancel = self.error(**msg) #ename, evalue, traceback
+                        elif msg.get('name') in ['stdout', 'stderr']:
+                            self.stream(msg['text'], msg['name'])
+                    msg = kc.get_shell_msg(timeout=1)
                     msg = msg['content']
                     for payload in msg.get('payload', []):
                         if 'data' in payload:
                             # ?print
                             data = payload['data']['text/plain']
                             self.immediate(data)
-                    @wait_idle
-                    def _(msg):
-                        if 'data' in msg:
-                            data = msg['data']['text/plain']
-                            self.text(data)
-                        if 'ename' in msg:
-                            self.error(**msg) #ename, evalue, traceback
-                        if msg.get('name') in ['stdout', 'stderr']:
-                            self.stream(msg['text'], msg['name'])
+                    if cancel:
+                        break
             prevs = parts
 
         yield dotdict(process=process, inspect=inspect, complete=complete)
@@ -164,12 +170,18 @@ def unansi(msg):
     ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
     return ansi_escape.sub('', msg)
 
+def shorter(xs):
+    if len(xs) > 3:
+        return [xs[0], '[...]', xs[-1]]
+    else:
+        return xs
+
 std = Handler()
 std.default   = lambda k, *args, **kws: print(k)
-std.executing = lambda part: print('\n>>>', '\n... '.join(part.strip().split('\n')))
-std.error     = lambda ename, evalue, traceback: print('\n'.join(traceback))
-std.stream    = lambda text, stream: print(text.strip())
-std.text      = lambda text: print(text.strip())
+std.executing = lambda part: print('\n>>>', '\n... '.join(shorter(part.strip().split('\n'))))
+std.error     = lambda ename, evalue, traceback: print('\n'.join(traceback)) or True
+std.stream    = lambda text, stream: print(text, end='')
+std.text      = lambda text: print(text.strip('\n'))
 std.immediate = lambda text: print(text.strip())
 std.inspected = lambda text: print(text.strip())
 std.completed = lambda ms: print('completed: ', ms)
@@ -215,10 +227,18 @@ if __name__ == '__main__':
         i = Inotify()
         i.add_watch('.')
         watched_file = sys.argv[1]
+        import os
+        common = os.path.commonpath([os.getcwd(), watched_file])
+        watched_file = watched_file[1+len(common):]
+        # print(common, watched_file)
         with kernel() as k:
-            k.process(open(watched_file, 'r').read(), std)
+            try:
+                k.process(open(watched_file, 'r').read(), std)
+            except FileNotFoundError:
+                pass
             for event in i.event_gen(yield_nones=False):
                 (_, event_type, _, filename) = event
+                # print(event_type, filename)
 
                 if event_type == ['IN_MODIFY'] and filename == watched_file:
                     k.process(open(watched_file, 'r').read(), std)
@@ -229,7 +249,6 @@ if __name__ == '__main__':
                     pos = int(pos)
 
                     def send(msg):
-                        print(msg)
                         msg = 'eval -client {} "{}"'.format(client, qq(msg))
                         p = Popen(['kak', '-p', str(session).rstrip()], stdin=PIPE)
                         p.stdin.write(msg.encode())
@@ -243,6 +262,7 @@ if __name__ == '__main__':
                         send(msg)
 
                     def inspected(text):
+                        print('\n' + text)
                         width, height = map(int, args)
                         msg = unansi(text)
                         msg = [line[:width-8] for line in msg.split('\n')]

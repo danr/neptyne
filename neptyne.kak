@@ -1,9 +1,15 @@
 
+map global insert <a-c> '<a-;>: neptyne_setup; neptyne_complete<ret>'
+map global insert <a-h> '<a-;>: neptyne_inspect<ret>'
+map global insert <a-w> '<a-;>: write<ret>'
+map global normal <a-h> ': neptyne_inspect<ret>'
+
 def neptyne_setup %{
     try %{
         decl completions neptyne_completions
     }
     set -add window completers option=neptyne_completions
+    map window insert <a-c> '<a-;>: neptyne_complete<ret>'
 }
 def neptyne_complete %{
     eval -draft -no-hooks %{
@@ -27,7 +33,8 @@ def neptyne_inspect %{
 %val{selection}"
     }
 }
-map global insert <a-c> '<a-;>: neptyne_complete<ret>'
-map global insert <a-h> '<a-;>: neptyne_inspect<ret>'
-map global normal <a-h> ': neptyne_inspect<ret>'
-
+def neptyne %{
+    nop %sh{
+        (urxvt -e python /home/dan/code/neptyne/neptyne.py $kak_buffile) >/dev/null 2>&1 </dev/null &
+    }
+}
