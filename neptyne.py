@@ -67,13 +67,17 @@ u.l""", ["['1']"]),
 ]
 
 
-def drop_while(p, xs):
+def span(p, xs):
     xs = iter(xs)
+    l, r = [], []
     for x in xs:
-        if not p(*x):
-            yield x
-            yield from xs
+        if p(*x):
+            l.append(x)
+        else:
+            r.append(x)
+            r += list(xs)
             break
+    return l, r
 
 def trim(s):
     if s:
@@ -90,7 +94,12 @@ def kernel():
     with jc.run_kernel(stdin=False) as kc:
         def wait_idle(f=None):
             while True:
-                msg = kc.get_iopub_msg()
+                try:
+                    msg = kc.get_iopub_msg()
+                except KeyboardInterrupt:
+                    kc.parent.interrupt_kernel()
+                    f('interrupted')
+                    continue
                 msg = msg['content']
                 if msg.get('execution_state', None) == 'idle':
                     break
@@ -122,7 +131,8 @@ def kernel():
             nonlocal prevs
             parts = re.split(r'\n\n(?=\S)', i)
             zipped = list(zip_longest(parts, prevs))
-            zipped = drop_while(lambda part, prev: trim(prev) == trim(part), zipped)
+            same, zipped = span(lambda part, prev: trim(prev) == trim(part), zipped)
+            prevs = list(map(lambda x: x[0], same))
             for part, prev in zipped:
                 if part:
                     self.executing(part)
@@ -130,13 +140,15 @@ def kernel():
                     cancel = False
                     @wait_idle
                     def _(msg):
+                        nonlocal cancel
                         if 'data' in msg:
                             # png and html can be sent here inline
                             # pprint(msg)
                             data = msg['data']['text/plain']
                             self.text(data)
+                        elif msg == 'interrupted':
+                            cancel = True
                         elif 'ename' in msg:
-                            nonlocal cancel
                             cancel = self.error(**msg) #ename, evalue, traceback
                         elif msg.get('name') in ['stdout', 'stderr']:
                             self.stream(msg['text'], msg['name'])
@@ -149,7 +161,8 @@ def kernel():
                             self.immediate(data)
                     if cancel:
                         break
-            prevs = parts
+                    else:
+                        prevs.append(part)
 
         yield dotdict(process=process, inspect=inspect, complete=complete)
 
@@ -240,10 +253,10 @@ if __name__ == '__main__':
                 (_, event_type, _, filename) = event
                 # print(event_type, filename)
 
-                if event_type == ['IN_MODIFY'] and filename == watched_file:
+                if event_type == ['IN_CLOSE_WRITE'] and filename == watched_file:
                     k.process(open(watched_file, 'r').read(), std)
 
-                if event_type == ['IN_MODIFY'] and filename == '.requests':
+                if event_type == ['IN_CLOSE_WRITE'] and filename == '.requests':
                     request, body = open(filename, 'r').read().split('\n', 1)
                     cmd, pos, client, session, *args = request.split(' ')
                     pos = int(pos)
