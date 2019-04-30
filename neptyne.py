@@ -144,8 +144,25 @@ def kernel():
                         if 'data' in msg:
                             # png and html can be sent here inline
                             # pprint(msg)
-                            data = msg['data']['text/plain']
-                            self.text(data)
+                            data = msg['data']
+                            png = data.get('image/png')
+                            if png:
+                                import libsixel
+                                from libsixel.encoder import Encoder
+                                import base64
+                                name = '/tmp/img.png'
+                                with open(name, 'wb') as f:
+                                    f.write(base64.b64decode(png))
+                                enc = Encoder()
+                                # enc.setopt(e.SIXEL_OPTFLAG_WIDTH, "400")
+                                # enc.setopt(e.SIXEL_OPTFLAG_QUALITY, "low")
+                                enc.setopt(libsixel.SIXEL_OPTFLAG_COLORS, "256")
+                                if msg.get('metadata', {}).get('needs_background') == 'light':
+                                    enc.setopt(libsixel.SIXEL_OPTFLAG_BGCOLOR, "#fff")
+                                enc.encode(name)
+                            else:
+                                text = data['text/plain']
+                                self.text(text)
                         elif msg == 'interrupted':
                             cancel = True
                         elif 'ename' in msg:
@@ -243,7 +260,6 @@ if __name__ == '__main__':
         import os
         common = os.path.commonpath([os.getcwd(), watched_file])
         watched_file = watched_file[1+len(common):]
-        # print(common, watched_file)
         with kernel() as k:
             try:
                 k.process(open(watched_file, 'r').read(), std)

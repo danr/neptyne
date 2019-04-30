@@ -35,6 +35,7 @@ def neptyne_inspect %{
 }
 def neptyne %{
     nop %sh{
-        (urxvt -e python /home/dan/code/neptyne/neptyne.py $kak_buffile) >/dev/null 2>&1 </dev/null &
+        # (urxvt -e sh -c "python /home/dan/code/neptyne/neptyne.py $kak_buffile; bash") >/dev/null 2>&1 </dev/null &
+        (xterm -ti vt340 -xrm "XTerm*decTerminalID: vt340" -xrm "XTerm*numColorRegisters: 256" -e '(python /home/dan/code/neptyne/neptyne.py $kak_buffile; bash)') >/dev/null 2>&1 </dev/null &
     }
 }
