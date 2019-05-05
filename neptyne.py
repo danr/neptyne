@@ -92,19 +92,19 @@ class dotdict(dict):
 @contextmanager
 def kernel():
     with jc.run_kernel(stdin=False) as kc:
-        def wait_idle(f=None):
+        def wait_idle():
             while True:
                 try:
                     msg = kc.get_iopub_msg()
                 except KeyboardInterrupt:
                     kc.parent.interrupt_kernel()
-                    f('interrupted')
+                    yield 'interrupted'
                     continue
                 msg = msg['content']
                 if msg.get('execution_state', None) == 'idle':
                     break
                 else:
-                    f and f(msg)
+                    yield msg
 
         prevs = []
 
@@ -112,8 +112,8 @@ def kernel():
             msg_id = kc.complete(i, offset)
             data = kc.get_shell_msg()['content']
             matches = data['matches']
-            self.completed(matches)
-            wait_idle()
+            yield matches
+            list(wait_idle())
 
         def inspect(i, offset, self):
             msg_id = kc.inspect(i, offset)
@@ -121,11 +121,10 @@ def kernel():
             data = data['data']
             text = data.get('text/plain')
             if text:
-                self.inspected(text)
+                yield text
             else:
-                self.inspected(str(data))
-
-            wait_idle()
+                yield str(data)
+            list(wait_idle())
 
         def process(i, self):
             nonlocal prevs
@@ -138,9 +137,7 @@ def kernel():
                     self.executing(part)
                     msg_id = kc.execute(part)
                     cancel = False
-                    @wait_idle
-                    def _(msg):
-                        nonlocal cancel
+                    for msg in wait_idle():
                         if 'data' in msg:
                             # png and html can be sent here inline
                             # pprint(msg)
@@ -191,6 +188,11 @@ class Handler(dict):
         else:
             return v
 
+    def __getitem__(self, k):
+        return self.__getattr__(k)
+
+    __setattr__ = dict.__setitem__
+
     def default(self, k, *args, **kws):
         pprint((k, args, kws))
 
@@ -207,34 +209,31 @@ def shorter(xs):
         return xs
 
 std = Handler()
-std.default   = lambda k, *args, **kws: print(k)
 std.executing = lambda part: print('\n>>>', '\n... '.join(shorter(part.strip().split('\n'))))
 std.error     = lambda ename, evalue, traceback: print('\n'.join(traceback)) or True
 std.stream    = lambda text, stream: print(text, end='')
 std.text      = lambda text: print(text.strip('\n'))
 std.immediate = lambda text: print(text.strip())
-std.inspected = lambda text: print(text.strip())
-std.completed = lambda ms: print('completed: ', ms)
 
 def test():
     with kernel() as k:
         self = Handler()
-        self.default = lambda k, *args, **kws: print(k)
         self.executing = lambda part: None # print('>>>', part)
         self.error = lambda ename, evalue, traceback: o_hat.append(evalue)
         self.stream = lambda text, stream: o_hat.append(text)
         self.text = lambda text: o_hat.append(text)
         md5 = lambda text: o_hat.append(hashlib.md5(text.encode()).hexdigest()[:6])
         self.immediate = md5
-        self.inspected = md5
-        self.completed = lambda ms: o_hat.append(ms)
+        self.inspect = md5
+        self.complete = lambda ms: o_hat.append(ms)
         for i, o in io:
             o_hat = []
             if isinstance(i, str):
                 k.process(i, self)
             else:
                 cmd, s = i
-                k[cmd](s, len(s), self)
+                for res in k[cmd](s, len(s), self):
+                    self[cmd](res)
             if o != o_hat:
                 print('BAD', o, o_hat)
             else:
@@ -246,7 +245,8 @@ def test():
                 k.process(i, std)
             else:
                 cmd, s = i
-                k[cmd](s, len(s), std)
+                for msg in k[cmd](s, len(s), std):
+                    print(msg)
 
 if __name__ == '__main__':
     import sys
@@ -285,21 +285,24 @@ if __name__ == '__main__':
                         p.stdin.close()
                         p.wait()
 
-                    def completed(matches):
-                        msg = ['"' + qq(m) + '|neptyne_inspect|' + qq(m) + '"' for m in matches]
-                        msg = ' '.join(args + msg)
-                        send(msg)
+                    if cmd == 'complete':
+                        for matches in k.complete(body, pos, std):
+                            msg = ['"' + qq(m) + '|neptyne_inspect|' + qq(m) + '"' for m in matches]
+                            msg = ' '.join(args + msg)
+                            send(msg)
 
-                    def inspected(text):
-                        print('\n' + text)
-                        width, height = map(int, args)
-                        msg = unansi(text)
-                        msg = [line[:width-8] for line in msg.split('\n')]
-                        msg = '\n'.join(msg[:height-8])
-                        msg = 'info "{}"'.format(qq(msg))
-                        send(msg)
-                    std.completed = completed
-                    std.inspected = inspected
-                    k[cmd](body, pos, std)
+                    elif cmd == 'inspect':
+                        for text in k.inspect(body, pos, std):
+                            print('\n' + text)
+                            width, height = map(int, args)
+                            msg = unansi(text)
+                            msg = [line[:width-8] for line in msg.split('\n')]
+                            msg = '\n'.join(msg[:height-8])
+                            msg = 'info "{}"'.format(qq(msg))
+                            send(msg)
+
+                    else:
+                        print('Invalid command: ', cmd)
+
 
 
