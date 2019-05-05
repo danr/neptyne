@@ -234,7 +234,7 @@ def test():
                 k.process(i, self)
             else:
                 cmd, s = i
-                o_hat.append(k[cmd](s, len(s), self))
+                k[cmd](s, len(s), self)
             if o != o_hat:
                 print('BAD', o, o_hat)
             else:
