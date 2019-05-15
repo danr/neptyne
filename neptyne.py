@@ -90,8 +90,9 @@ class dotdict(dict):
     __delattr__ = dict.__delitem__
 
 @contextmanager
-def kernel():
-    with jc.run_kernel(stdin=False) as kc:
+def kernel(kernel_name='python'):
+    with jc.run_kernel(kernel_name=kernel_name, stdin=False) as kc:
+        # print('got kernel')
         def wait_idle():
             while True:
                 try:
@@ -118,7 +119,7 @@ def kernel():
         def inspect(i, offset, self):
             msg_id = kc.inspect(i, offset)
             data = kc.get_shell_msg()['content']
-            data = data['data']
+            data = data.get('data', {})
             text = data.get('text/plain')
             if text:
                 yield text
@@ -143,13 +144,20 @@ def kernel():
                             # pprint(msg)
                             data = msg['data']
                             png = data.get('image/png')
-                            if png:
+                            svgxml = data.get('image/svg+xml')
+                            if png or svgxml:
                                 import libsixel
                                 from libsixel.encoder import Encoder
                                 import base64
                                 name = '/tmp/img.png'
-                                with open(name, 'wb') as f:
-                                    f.write(base64.b64decode(png))
+                                if svgxml:
+                                    tmp = '/tmp/img.xml'
+                                    with open(tmp, 'w') as f:
+                                        f.write(svgxml)
+                                    Popen(["convert", tmp, name]).wait()
+                                else:
+                                    with open(name, 'wb') as f:
+                                        f.write(base64.b64decode(png))
                                 enc = Encoder()
                                 # enc.setopt(e.SIXEL_OPTFLAG_WIDTH, "400")
                                 # enc.setopt(e.SIXEL_OPTFLAG_QUALITY, "low")
@@ -157,9 +165,11 @@ def kernel():
                                 if msg.get('metadata', {}).get('needs_background') == 'light':
                                     enc.setopt(libsixel.SIXEL_OPTFLAG_BGCOLOR, "#fff")
                                 enc.encode(name)
-                            else:
+                            elif 'text/plain' in data:
                                 text = data['text/plain']
                                 self.text(text)
+                            else:
+                                print('hmm?', data.keys())
                         elif msg == 'interrupted':
                             cancel = True
                         elif 'ename' in msg:
@@ -196,6 +206,8 @@ class Handler(dict):
     def default(self, k, *args, **kws):
         pprint((k, args, kws))
 
+def completion_esc(msg):
+    return msg.replace('\\', '\\\\').replace('|', '\\|')
 def qq(msg):
     return msg.replace('"', '""').replace('%', '%%')
 def unansi(msg):
@@ -260,7 +272,8 @@ if __name__ == '__main__':
         import os
         common = os.path.commonpath([os.getcwd(), watched_file])
         watched_file = watched_file[1+len(common):]
-        with kernel() as k:
+        # print(common, watched_file)
+        with kernel('julia-1.1' if watched_file.endswith('.jl') else 'python') as k:
             try:
                 k.process(open(watched_file, 'r').read(), std)
             except FileNotFoundError:
@@ -273,9 +286,13 @@ if __name__ == '__main__':
                     k.process(open(watched_file, 'r').read(), std)
 
                 if event_type == ['IN_CLOSE_WRITE'] and filename == '.requests':
-                    request, body = open(filename, 'r').read().split('\n', 1)
-                    cmd, pos, client, session, *args = request.split(' ')
-                    pos = int(pos)
+                    try:
+                        request, body = open(filename, 'r').read().split('\n', 1)
+                        cmd, pos, client, session, *args = request.split(' ')
+                        pos = int(pos)
+                    except ValueError:
+                        print('Invalid request:', str(open(filename, 'r').read()))
+                        continue
 
                     def send(msg):
                         msg = 'eval -client {} "{}"'.format(client, qq(msg))
@@ -287,7 +304,7 @@ if __name__ == '__main__':
 
                     if cmd == 'complete':
                         for matches in k.complete(body, pos, std):
-                            msg = ['"' + qq(m) + '|neptyne_inspect|' + qq(m) + '"' for m in matches]
+                            msg = ['"' + qq(completion_esc(m)) + '|neptyne_inspect|' + qq(completion_esc(m)) + '"' for m in matches]
                             msg = ' '.join(args + msg)
                             send(msg)
 
