@@ -2,21 +2,22 @@
 map global insert <a-C> '<a-;>: neptyne_setup; neptyne_complete<ret>'
 map global insert <a-i> '<a-;>: neptyne_setup; neptyne_jedi icomplete<ret>'
 map global insert <a-c> '<a-;>: neptyne_setup; neptyne_jedi complete<ret>'
-map global insert <a-d> '<a-;>: neptyne_setup; neptyne_jedi docstring<ret>'
-map global insert <a-z> '<a-;>: neptyne_setup; neptyne_jedi usages<ret>'
-map global insert <a-s> '<a-;>: neptyne_setup; neptyne_jedi sig<ret>'
-map global insert <a-g> '<a-;>: neptyne_setup; neptyne_jedi goto<ret>'
+map global insert <a-d> '<a-;>: neptyne_jedi docstring<ret>'
+map global insert <a-z> '<a-;>: neptyne_jedi usages<ret>'
+map global insert <a-s> '<a-;>: neptyne_jedi sig<ret>'
+map global insert <a-g> '<a-;>: neptyne_jedi goto<ret>'
 map global insert <a-h> '<a-;>: neptyne_inspect normal<ret>'
 map global insert <a-w> '<a-;>: write<ret>'
 map global normal <a-h> ': neptyne_inspect<ret>'
 
+try %{
+    decl -hidden str _neptyne_location %val{source}
+    decl -hidden str _neptyne_tmp
+    decl completions neptyne_completions
+}
+
 def neptyne_setup %{
-    try %{
-        decl -hidden str _neptyne_tmp
-        decl completions neptyne_completions
-    }
     set -add window completers option=neptyne_completions
-    map window insert <a-c> '<a-;>: neptyne_jedi complete<ret>'
 }
 
 def neptyne_jedi -params 1 %{
@@ -56,9 +57,10 @@ def neptyne_inspect -params 1 %{
 %val{selection}"
     }
 }
+
 def neptyne %{
     nop %sh{
-        # (urxvt -e sh -c "python /home/dan/code/neptyne/neptyne.py $kak_buffile; bash") >/dev/null 2>&1 </dev/null &
-        (xterm -ti vt340 -xrm "XTerm*decTerminalID: vt340" -xrm "XTerm*numColorRegisters: 256" -e '(python /home/dan/code/neptyne/neptyne.py $kak_buffile; bash)') >/dev/null 2>&1 </dev/null &
+        path=$(dirname $kak_opt__neptyne_location)
+        (xterm -ti vt340 -xrm "XTerm*decTerminalID: vt340" -xrm "XTerm*numColorRegisters: 256" -e "(python $path/neptyne.py $kak_buffile; bash)") >/dev/null 2>&1 </dev/null &
     }
 }
