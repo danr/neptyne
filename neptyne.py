@@ -9,6 +9,14 @@ from itertools import zip_longest
 from contextlib import contextmanager
 from subprocess import Popen, PIPE
 
+def kernel_name(filename):
+    if filename.endswith('.jl'):
+        return 'julia-1.1'
+    elif filename.endswith('.lua'):
+        return 'lua'
+    else:
+        return 'python'
+
 io = [("""
 x = 2
 
@@ -100,6 +108,14 @@ def dbg(part):
             line = line.replace('##', f'dbg({words}) #')
         return line
     return '\n'.join(map(dbg_, part.split('\n')))
+
+def unlocal(part):
+    def unlocal_(line):
+        if line.startswith('local '):
+            line = line[len('local '):]
+        return line
+    return '\n'.join(map(unlocal_, part.split('\n')))
+
 
 @contextmanager
 def kernel(kernel_name='python'):
@@ -194,7 +210,7 @@ def kernel(kernel_name='python'):
 
         def process(i, self):
             nonlocal prevs
-            parts = [ dbg(p) for p in re.split(r'\n\n(?=\S)', i) ]
+            parts = [ unlocal(dbg(p)) for p in re.split(r'\n\n(?=\S)', i) ]
             zipped = list(zip_longest(parts, prevs))
             same, zipped = span(lambda part, prev: trim(prev) == trim(part), zipped)
             prevs = list(map(lambda x: x[0], same))
@@ -240,7 +256,7 @@ def shorter(xs):
 
 std = Handler()
 std.executing = lambda part: print('\n>>>', '\n... '.join(shorter(part.strip().split('\n'))))
-std.error     = lambda ename, evalue, traceback: print('\n'.join(traceback)) or True
+std.error     = lambda ename, evalue, traceback, **kws: print('\n'.join(traceback)) or True
 std.stream    = lambda text, stream: print(text, end='')
 std.text      = lambda text: print(text.strip('\n'))
 std.immediate = lambda text: print(text.strip())
@@ -302,7 +318,7 @@ if __name__ == '__main__':
         watched_file = watched_file[1+len(common):]
         jedi_setup = False
         # print(common, watched_file)
-        with kernel('julia-1.1' if watched_file.endswith('.jl') else 'python') as k:
+        with kernel(kernel_name(watched_file)) as k:
             try:
                 k.process(open(watched_file, 'r').read(), std)
             except FileNotFoundError:
