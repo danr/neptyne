@@ -212,10 +212,11 @@ def kernel(kernel_name='python'):
 
         def process(i, self):
             nonlocal prevs
+            prevs = [] # [ part for part, prev in same ]
             parts = [ unlocal(dbg(p)) for p in re.split(r'(\n\n(?=\S))', i) ]
             zipped = list(zip_longest(parts, prevs))
             same, zipped = span(lambda part, prev: trim(prev) == trim(part), zipped)
-            prevs = [] # [ part for part, prev in same ]
+            print('same:', len(same))
             for part, prev in zipped:
                 if part:
                     lines = lambda s: len(re.findall(r'\n', s))
@@ -336,14 +337,14 @@ if __name__ == '__main__':
         jedi_setup = False
         # print(common, watched_file)
         with kernel(kernel_name(watched_file)) as k:
-            try:
-                k.process(open(watched_file, 'r').read(), std_handler)
-            except FileNotFoundError:
-                pass
+            # try:
+            #     k.process(open(watched_file, 'r').read(), std_handler)
+            # except FileNotFoundError:
+            #     pass
             for event in i.event_gen(yield_nones=False):
                 try:
                     (_, event_type, _, filename) = event
-                    # print(event_type, filename)
+                    print(event_type, filename)
 
                     if event_type == ['IN_CLOSE_WRITE'] and filename == watched_file:
                         if False:
@@ -354,6 +355,7 @@ if __name__ == '__main__':
                             request, body = open(filename, 'r').read().split('\n', 1)
                             cmd, pos, client, session, *args = request.split(' ')
                             pos = int(pos)
+                            print(request)
                         except ValueError:
                             print('Invalid request:', str(open(filename, 'r').read()))
                             continue
@@ -403,6 +405,7 @@ if __name__ == '__main__':
 
                             state = dotdict(seq_id = 0)
                             def encoded_send(**data):
+                                pprint(data)
                                 state.seq_id += 1
                                 json_obj = json.dumps({**data, **state}).encode()
                                 b64_str = codecs.encode(json_obj, 'base64').decode()
@@ -424,6 +427,7 @@ if __name__ == '__main__':
                                             codepoint=codepoint(line),
                                             **kws)
 
+                            print('processing')
                             k.process(body, ProcessHandler())
 
                         elif cmd == 'inspect':
