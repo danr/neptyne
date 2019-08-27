@@ -3,6 +3,7 @@ import hashlib
 import re
 import inspect
 import json
+import codecs
 
 from pprint import pprint
 from itertools import zip_longest
@@ -157,8 +158,8 @@ def kernel(kernel_name='python'):
                 yield str(data)
             list(wait_idle())
 
-        def process_part(part, self):
-            self.executing(part)
+        def process_part(part, self, **metadata):
+            self.executing(part, **metadata)
             msg_id = kc.execute(part)
             cancel = False
             for msg in wait_idle():
@@ -188,35 +189,38 @@ def kernel(kernel_name='python'):
                         if msg.get('metadata', {}).get('needs_background') == 'light':
                             enc.setopt(libsixel.SIXEL_OPTFLAG_BGCOLOR, "#fff")
                         enc.encode(name)
+                        # TODO: make the handler do this (d'uh)
                     elif 'text/plain' in data:
                         text = data['text/plain']
-                        self.text(text)
+                        self.text(text, **metadata)
                     else:
                         print('hmm?', data.keys())
                 elif msg == 'interrupted':
                     cancel = True
                 elif 'ename' in msg:
-                    cancel = self.error(**msg) #ename, evalue, traceback
+                    cancel = self.error(**msg, **metadata) #ename, evalue, traceback
                 elif msg.get('name') in ['stdout', 'stderr']:
-                    self.stream(msg['text'], msg['name'])
+                    self.stream(msg['text'], msg['name'], **metadata)
             msg = kc.get_shell_msg(timeout=1)
             msg = msg['content']
             for payload in msg.get('payload', []):
                 if 'data' in payload:
                     # ?print
                     data = payload['data']['text/plain']
-                    self.immediate(data)
+                    self.immediate(data, **metadata)
             return cancel
 
         def process(i, self):
             nonlocal prevs
-            parts = [ unlocal(dbg(p)) for p in re.split(r'\n\n(?=\S)', i) ]
+            parts = [ unlocal(dbg(p)) for p in re.split(r'(\n\n(?=\S))', i) ]
             zipped = list(zip_longest(parts, prevs))
             same, zipped = span(lambda part, prev: trim(prev) == trim(part), zipped)
-            prevs = list(map(lambda x: x[0], same))
+            prevs = [] # [ part for part, prev in same ]
             for part, prev in zipped:
                 if part:
-                    cancel = process_part(part, self)
+                    lines = lambda s: len(re.findall(r'\n', s))
+                    line = sum(lines(p) for p in prevs) + lines(part.rstrip())
+                    cancel = process_part(part, self, line=line) if trim(part) else False
                     if cancel:
                         break
                     else:
@@ -224,21 +228,21 @@ def kernel(kernel_name='python'):
 
         yield dotdict(process=process, inspect=inspect, complete=complete, process_part=process_part)
 
-class Handler(dict):
-    def __getattr__(self, k):
-        v = self.get(k)
-        if v is None:
-            return lambda *args, **kws: self.default(k, *args, **kws)
-        else:
-            return v
+class Handler():
+    def executing(_, part, **metadata):
+        print(metadata, '\n>>>', '\n... '.join(shorter(part.strip().split('\n'))))
 
-    def __getitem__(self, k):
-        return self.__getattr__(k)
+    def error(_, ename, evalue, traceback, **kws):
+        print('\n'.join(traceback)) or True
 
-    __setattr__ = dict.__setitem__
+    def stream(_, text, stream, **metadata):
+        print(metadata, text, end='')
 
-    def default(self, k, *args, **kws):
-        pprint((k, args, kws))
+    def text(_, text, **metadata):
+        print(metadata, text.strip('\n'))
+
+    def immediate(_, text, **metadata):
+        print(metadata, text.strip())
 
 def completion_esc(msg):
     return msg.replace('\\', '\\\\').replace('|', '\\|')
@@ -254,32 +258,45 @@ def shorter(xs):
     else:
         return xs
 
-std = Handler()
-std.executing = lambda part: print('\n>>>', '\n... '.join(shorter(part.strip().split('\n'))))
-std.error     = lambda ename, evalue, traceback, **kws: print('\n'.join(traceback)) or True
-std.stream    = lambda text, stream: print(text, end='')
-std.text      = lambda text: print(text.strip('\n'))
-std.immediate = lambda text: print(text.strip())
+std_handler = Handler()
 
 def test():
     with kernel() as k:
-        self = Handler()
-        self.executing = lambda part: None # print('>>>', part)
-        self.error = lambda ename, evalue, traceback: o_hat.append(evalue)
-        self.stream = lambda text, stream: o_hat.append(text)
-        self.text = lambda text: o_hat.append(text)
-        md5 = lambda text: o_hat.append(hashlib.md5(text.encode()).hexdigest()[:6])
-        self.immediate = md5
-        self.inspect = md5
-        self.complete = lambda ms: o_hat.append(ms)
+        class TestHandler(Handler):
+            def executing(_, part, **metadata):
+                # print('>>>', part)
+                pass
+
+            def error(_, ename, evalue, traceback, **metadata):
+                o_hat.append(evalue)
+
+            def stream(_, text, stream, **metadata):
+                o_hat.append(text)
+
+            def text(_, text, **metadata):
+                o_hat.append(text)
+
+            def complete(_, ms):
+                o_hat.append(ms)
+
+            def md5(_, text, **metadata):
+                o_hat.append(hashlib.md5(text.encode()).hexdigest()[:6])
+
+            inspect = immediate = md5
+
+            def __getitem__(self, item):
+                return getattr(self, item)
+
+        test_handler = TestHandler()
+
         for i, o in io:
             o_hat = []
             if isinstance(i, str):
-                k.process(i, self)
+                k.process(i, test_handler)
             else:
                 cmd, s = i
-                for res in k[cmd](s, len(s), self):
-                    self[cmd](res)
+                for res in k[cmd](s, len(s), test_handler):
+                    test_handler[cmd](res)
             if o != o_hat:
                 print('BAD', o, o_hat)
             else:
@@ -288,10 +305,10 @@ def test():
         print('\n-------------\n')
         for i, _o in io:
             if isinstance(i, str):
-                k.process(i, std)
+                k.process(i, std_handler)
             else:
                 cmd, s = i
-                for msg in k[cmd](s, len(s), std):
+                for msg in k[cmd](s, len(s), std_handler):
                     print(msg)
 
 def filter_completions(xs):
@@ -320,7 +337,7 @@ if __name__ == '__main__':
         # print(common, watched_file)
         with kernel(kernel_name(watched_file)) as k:
             try:
-                k.process(open(watched_file, 'r').read(), std)
+                k.process(open(watched_file, 'r').read(), std_handler)
             except FileNotFoundError:
                 pass
             for event in i.event_gen(yield_nones=False):
@@ -329,7 +346,8 @@ if __name__ == '__main__':
                     # print(event_type, filename)
 
                     if event_type == ['IN_CLOSE_WRITE'] and filename == watched_file:
-                        k.process(open(watched_file, 'r').read(), std)
+                        if False:
+                            k.process(open(watched_file, 'r').read(), std_handler)
 
                     if event_type == ['IN_CLOSE_WRITE'] and filename == '.requests':
                         try:
@@ -363,15 +381,53 @@ if __name__ == '__main__':
                             send(msg)
 
                         if cmd == 'complete':
-                            for reply in k.complete(body, pos, std):
+                            for reply in k.complete(body, pos, std_handler):
                                 matches = [
                                     dict(name=m, complete=m, doccmd='neptyne_inspect menu')
                                     for m in reply
                                 ]
                                 completions(matches, args)
 
+                        elif cmd == 'process':
+                            timestamp = args[0]
+
+                            send(f'''
+                                try %[ decl line-specs neptyne_flags ]
+                                try %[ addhl window/ flag-lines default neptyne_flags ]
+                                set window neptyne_flags {timestamp}
+                                set window ui_options
+                            ''')
+
+                            def codepoint(line):
+                                return chr(ord('\ue000') + line)
+
+                            state = dotdict(seq_id = 0)
+                            def encoded_send(**data):
+                                state.seq_id += 1
+                                json_obj = json.dumps({**data, **state}).encode()
+                                b64_str = codecs.encode(json_obj, 'base64').decode()
+                                b64_str = b64_str.replace('\n', '').replace('=', '\\=')
+                                send(f'set -add window ui_options neptyne_{state.seq_id}={b64_str}')
+
+                            class ProcessHandler():
+                                def executing(_, part, line):
+                                    # print('\n>>>', '\n... '.join(shorter(part.strip().split('\n'))))
+                                    send('set -add window neptyne_flags ' + str(2+line) + '|' + codepoint(line))
+                                    encoded_send(command='executing', args=[part], line=line, codepoint=codepoint(line))
+                                    send('set -add window neptyne_flags ' + str(2+line) + '|' + codepoint(line))
+
+                                def __getattr__(_, command):
+                                    return lambda *args, line, **kws: encoded_send(
+                                            command=command,
+                                            args=args,
+                                            line=line,
+                                            codepoint=codepoint(line),
+                                            **kws)
+
+                            k.process(body, ProcessHandler())
+
                         elif cmd == 'inspect':
-                            for text in k.inspect(body, pos, std):
+                            for text in k.inspect(body, pos, std_handler):
                                 print('\n' + text)
                                 where, *args = args
                                 width, height = map(int, args)

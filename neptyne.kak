@@ -58,6 +58,18 @@ def neptyne_inspect -params 1 %{
     }
 }
 
+def neptyne_process %{
+    eval -draft -no-hooks %{
+        try %{
+            exec <a-i> w <a-:> ';'
+        }
+        exec \%
+        echo -to-file .requests "process %val{cursor_byte_offset} %val{client} %val{session} %val{timestamp}
+%val{selection}"
+    }
+}
+
+
 def neptyne %{
     nop %sh{
         path=$(dirname $kak_opt__neptyne_location)
