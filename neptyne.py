@@ -4,6 +4,7 @@ import re
 import inspect
 import json
 import codecs
+import time
 
 from pprint import pprint
 from itertools import zip_longest
@@ -23,7 +24,8 @@ def unindent(s):
     d = min(len(l) - len(l.lstrip()) for l in lines if l)
     return '\n'.join(l[d:] for l in lines)
 
-unindent("  apan")
+
+unindent("  pan")
 
 test_cases = [("""
     x = 2
@@ -182,7 +184,7 @@ def kernel(kernel_name='python'):
 
         def process(i, handler):
             nonlocal prevs
-            # prevs = []
+            prevs = []
             parts = [ dbg(p) for p in re.split(r'(\n\n(?=\S))', i) ]
             zipped = list(zip_longest(parts, prevs))
             same, zipped = span(lambda part, prev: trim(prev) == trim(part), zipped)
@@ -320,7 +322,32 @@ def filter_completions(xs):
 def info(s):
     return 'info -style menu "' + qq(s) + '"'
 
-def handle_request(kernel, body, cmd, pos, client, session, *args):
+class Resource():
+    def __init__(self, keys):
+        self.free = set(keys)
+        self.map = dotdict()
+
+    def pop(self, key):
+        self.free.add(key)
+        try:
+            del self.map[key]
+        except KeyError:
+            pass
+
+    def add(self, value):
+        key = self.free.pop()
+        self.map[key] = value
+        return key
+
+    def __getitem__(self, key):
+        return self.map[key]
+
+    def __setitem__(self, key, value):
+        self.map[key] = value
+
+PUAs = {chr(x) for x in range(0xe000, 0xf8ff)}
+
+def handle_request(kernel, body, cmd, pos, client, session, *args, flags=Resource(PUAs)):
 
     pos = int(pos)
 
@@ -355,41 +382,53 @@ def handle_request(kernel, body, cmd, pos, client, session, *args):
             ]
             completions(matches, args)
 
-    def process(timestamp):
-        send(f'''
-            try %[ decl line-specs neptyne_flags ]
-            try %[ addhl window/ flag-lines default neptyne_flags ]
-            set window neptyne_flags {timestamp}
-            set window ui_options
-        ''')
+    def process(timestamp, _timestamp_flag_lines, *flag_lines):
 
-        def codepoint(line):
-            return chr(ord('\ue000') + line)
+        # ['12|\ue000', '14|\ue002']
+        # {'12': '\ue000', '14': '\ue002'}
+        offset = 2
+        flag_lines = [x.split('|') for x in flag_lines if '|' in x]
+        print(flag_lines)
+        flag_lines = {int(k) - offset: v for k, v in flag_lines}
+        state = dotdict(lastline = -offset)
 
-        state = dotdict(seq_id = 0)
+        def b64_json(data):
+            json_obj = json.dumps(data).encode()
+            b64_str = codecs.encode(json_obj, 'base64').decode()
+            return b64_str.replace('\n', '').replace('=', '\\=')
+
+
+        def set_char(char, value):
+            send(f'set -add window ui_options neptyne_{ord(char)}={value}')
+
         def encoded_send(**data):
             pprint(data)
-            state.seq_id += 1
-            json_obj = json.dumps({**data, **state}).encode()
-            b64_str = codecs.encode(json_obj, 'base64').decode()
-            b64_str = b64_str.replace('\n', '').replace('=', '\\=')
-            send(f'set -add window ui_options neptyne_{state.seq_id}={b64_str}')
+            line = data['line']
+            char = flag_lines[line]
+            set_char(char, b64_json(data))
 
         class ProcessHandler():
             def executing(_, part, line):
-                # print('\n>>>', '\n... '.join(shorter(part.strip().split('\n'))))
-                send('set -add window neptyne_flags ' + str(2+line) + '|' + codepoint(line))
-                encoded_send(command='executing', args=[part], line=line, codepoint=codepoint(line))
+                for prev in range(state.lastline, line+1):
+                    if prev in flag_lines:
+                        char = flag_lines.pop(prev)
+                        flags.pop(char)
+                        set_char(char, '')
+                state.lastline = line+1
+                char = flags.add(line)
+                flag_lines[line] = char
+                spec = ' '.join(f'{l + offset}|{c}' for l, c in flag_lines.items())
+                send(f'set window neptyne_flags {timestamp} {spec}')
+                # encoded_send(command='executing', line=line)
 
             def __getattr__(_, command):
                 return lambda *args, line, **kws: encoded_send(
                         command=command,
                         args=args,
                         line=line,
-                        codepoint=codepoint(line),
                         **kws)
 
-        print('processing')
+        print('processing', body)
         kernel.process(body, ProcessHandler())
 
     def inspect():
@@ -511,8 +550,10 @@ if __name__ == '__main__' and 'MPLBACKEND' not in os.environ:
                     try:
                         request, body = open(filename, 'r').read().split('\n', 1)
                         handle_request(k, body, *request.split(' '))
-                    except ValueError:
-                        print('Invalid request:', str(open(filename, 'r').read()))
+                    except ValueError as e:
+                        print('Invalid request:', str(open(filename, 'r').read()).split('\n')[0])
+                        import traceback
+                        print(traceback.format_exc())
                         continue
 
 
