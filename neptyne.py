@@ -24,9 +24,6 @@ def unindent(s):
     d = min(len(l) - len(l.lstrip()) for l in lines if l)
     return '\n'.join(l[d:] for l in lines)
 
-
-unindent("  pan")
-
 test_cases = [("""
     x = 2
 
@@ -44,6 +41,7 @@ test_cases = [("""
     """, ['7']),
     ("""
     x = 2
+
 
     x += 1
     x*x
@@ -73,7 +71,7 @@ test_cases = [("""
 
     y(1)
     """, ['3']),
-    (("inspect", "y"), ['68d36b']),
+    (("inspect", "y"), ['edd3b1']),
     ("print(1)", ['1\n']),
     ("?print", ['e23cc7']),
     ("import sys; print(1, file=sys.stderr)", ['1\n']),
@@ -88,29 +86,58 @@ test_cases = [("""
     ("print(x)", ["0\n"]),
 ]
 
-def span(p, xs):
-    xs = iter(xs)
-    l, r = [], []
-    for x in xs:
-        if p(*x):
-            l.append(x)
-        else:
-            r.append(x)
-            r += list(xs)
-            break
-    return l, r
+class dotdict(dict):
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
 
 def trim(s):
     if s:
         return re.sub('\s*\n', '\n', re.sub('\#.*', '', s.strip()))
     return s
 
-class dotdict(dict):
-    __getattr__ = dict.get
-    __setattr__ = dict.__setitem__
-    __delattr__ = dict.__delitem__
+def id_stream(prevs):
+    id = max([0] + [prev.id or 0 for prev in prevs])
+    def bump():
+        nonlocal id
+        id += 1
+        return id
+    return bump
 
-def dbg(part):
+def slices(s):
+    return re.split(r'(?<=\S)(?=\n{2,}\S)', s)
+
+def line_count(s):
+    return len(re.findall(r'\n', s))
+
+def calculate_queue(body, prevs):
+    parts = slices(body)
+
+    changed = False
+    line_begin = -1
+    next_id = id_stream(prevs)
+    for prev, part in zip_longest(prevs, parts):
+        if part is not None:
+            line_end = line_begin + line_count(part.rstrip())
+            me = dotdict(
+                code = part,
+                line_begin = line_begin + 1,
+                line_end = line_end,
+                id = next_id()
+            )
+            if changed or (not prev or trim(prev.code) != trim(part) or prev.status == 'cancelled'):
+                changed = True
+                me.status = 'scheduled'
+                if prev and prev.msgs:
+                    me.prev_msgs = prev.msgs
+            else:
+                me.status = 'done'
+                if prev and prev.msgs:
+                    me.msgs = prev.msgs
+            yield me
+            line_begin = line_end
+
+def __dbg__unused__(part):
     def dbg_(line):
         if line.strip().startswith('##'):
             words = line.split()[1:]
@@ -133,87 +160,123 @@ def kernel(kernel_name='python'):
                     yield 'interrupted'
                     continue
                 msg = msg['content']
-                # pprint(msg)
                 if msg.get('execution_state', None) == 'idle':
                     break
                 else:
                     yield msg
 
-        prevs = []
-
-        def complete(i, offset, handler):
+        def complete(i, offset):
             msg_id = kc.complete(i, offset)
             data = kc.get_shell_msg()['content']
-            # pprint(data)
             matches = data['matches']
-            yield matches
             list(wait_idle())
+            return matches
 
-        def inspect(i, offset, handler):
+        def inspect(i, offset):
             msg_id = kc.inspect(i, offset)
             data = kc.get_shell_msg()['content']
             data = data.get('data', {})
             text = data.get('text/plain')
-            if text:
-                yield text
-            else:
-                yield str(data)
             list(wait_idle())
+            return text if text else str(data)
 
-        def process_part(part, handler, **metadata):
-            handler.executing(part, **metadata)
+        def process_part(part):
             msg_id = kc.execute(part)
-            cancel = False
             for msg in wait_idle():
                 if 'data' in msg:
-                    handler.data(msg['data'], **metadata)
+                    yield dotdict(type='data', data=msg['data'])
                 elif msg == 'interrupted':
-                    cancel = True
+                    yield dotdict(type='cancel', data={})
                 elif 'ename' in msg:
-                    cancel = handler.error(**msg, **metadata) #ename, evalue, traceback
+                    yield dotdict(type='error', data={'text/plain': '\n'.join(msg['traceback'])}, **msg)
                 elif msg.get('name') in ['stdout', 'stderr']:
-                    handler.stream(msg['text'], msg['name'], **metadata)
+                    yield dotdict(type='stream', data={'text/plain': msg['text']}, stream=msg['name'])
+                elif 'execution_state' in msg:
+                    pass
+                elif 'execution_count' in msg:
+                    pass
+                else:
+                    print('unknown message: ', end='')
+                    pprint(msg)
             msg = kc.get_shell_msg(timeout=1)
             msg = msg['content']
             for payload in msg.get('payload', []):
                 if 'data' in payload:
                     # ?print
-                    data = payload['data']['text/plain']
-                    handler.immediate(data, **metadata)
-            return cancel
+                    yield dotdict(type='data', data=payload['data'])
+                else:
+                    print('unknown message: ', end='')
+                    pprint(msg)
 
-        def process(i, handler):
+        def process_queue(queue):
+            # pprint(queue)
+            done = []
+            outdated = []
+            for i, q in enumerate(queue):
+                if q.status == 'done':
+                    done.append(q)
+                else:
+                    outdated = queue[i:]
+                    break
+            next_id = id_stream(queue)
+            state = lambda done, now=None, scheduled=[]: dotdict(done=done, now=now, scheduled=scheduled, all=done + ([now] if now else []) + scheduled)
+            errored = False
+            for i, now in enumerate(outdated):
+                scheduled = outdated[i+1:]
+                now = dotdict(now, id=next_id(), status='executing', msgs=[])
+                yield state(done, now, scheduled)
+
+                for msg in process_part(now.code):
+                    now = dotdict(now, id=next_id(), msgs=[*now.msgs, msg])
+                    yield state(done, now, scheduled)
+                    if msg.type == 'error' or msg.type == 'cancel':
+                        errored = True
+
+                if errored:
+                    cancelled = [dotdict(s, id=next_id(), status='cancelled', msgs=s.msgs or s.prev_msgs, prev_msgs=None) for s in [now, *scheduled]]
+                    yield state([*done, *cancelled])
+                    return
+
+                now = dotdict(now, id=next_id(), status='done')
+                if 'prev_msgs' in now:
+                    del now['prev_msgs']
+                done = [*done, now]
+
+            yield state(done)
+
+        prevs = []
+
+        def process(body):
             nonlocal prevs
-            # prevs = []
-            parts = [ dbg(p) for p in re.split(r'(\n\n(?=\S))', i) ]
-            zipped = list(zip_longest(parts, prevs))
-            same, zipped = span(lambda part, prev: trim(prev) == trim(part), zipped)
-            prevs = [ part for part, prev in same ]
-            # print('same:', len(same))
-            for part, prev in zipped:
-                if part:
-                    lines = lambda s: len(re.findall(r'\n', s))
-                    line = sum(lines(p) for p in prevs) + lines(part.rstrip())
-                    cancel = process_part(part, handler, line=line) if trim(part) else False
-                    if cancel:
-                        break
-                    else:
-                        prevs.append(part)
+            queue = list(calculate_queue(body, prevs))
+            for fwd in process_queue(queue):
+                yield fwd
+                prevs = fwd.done
 
         yield dotdict(locals())
 
-class Handler():
-    def executing(_, part, **metadata):
-        print(metadata, '\n>>>', '\n... '.join(shorter(part.strip().split('\n'))))
+def completion_esc(msg):
+    return msg.replace('\\', '\\\\').replace('|', '\\|')
 
-    def error(_, ename, evalue, traceback, **kws):
-        print('\n'.join(traceback)) or True
+def qq(msg):
+    return msg.replace('"', '""').replace('%', '%%')
 
-    def stream(_, text, stream, **metadata):
-        print(metadata, text, end='')
+def unansi(msg):
+    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
+    return ansi_escape.sub('', msg)
 
-    def data(_, mimes, **metadata):
-        # pprint(mimes)
+def shorter(xs):
+    if len(xs) > 3:
+        return [xs[0], '[...]', xs[-1]]
+    else:
+        return xs
+
+def msg_to_stdout(msg):
+    if msg.data:
+        mimes = msg.data
+        text = mimes['text/plain']
+        print(text, end='' if msg.type == 'stream' else '\n')
+
         # png and html can be sent here inline
         png = mimes.get('image/png')
         svgxml = mimes.get('image/svg+xml')
@@ -231,72 +294,54 @@ class Handler():
                 with open(name, 'wb') as f:
                     f.write(base64.b64decode(png))
             enc = Encoder()
-            # enc.setopt(e.SIXEL_OPTFLAG_WIDTH, "400")
-            # enc.setopt(e.SIXEL_OPTFLAG_QUALITY, "low")
             enc.setopt(libsixel.SIXEL_OPTFLAG_COLORS, "256")
             if msg.get('metamimes', {}).get('needs_background') == 'light':
                 enc.setopt(libsixel.SIXEL_OPTFLAG_BGCOLOR, "#fff")
             enc.encode(name)
-            return
-        print(metadata, mimes.get('text/plain').strip('\n'))
 
-    def immediate(_, text, **metadata):
-        print(metadata, text.strip())
 
-def completion_esc(msg):
-    return msg.replace('\\', '\\\\').replace('|', '\\|')
-def qq(msg):
-    return msg.replace('"', '""').replace('%', '%%')
-def unansi(msg):
-    ansi_escape = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-    return ansi_escape.sub('', msg)
+def processed_messages(states):
+    for state in states:
+        now = state.now
+        if now and now.msgs:
+            yield now.msgs[-1]
 
-def shorter(xs):
-    if len(xs) > 3:
-        return [xs[0], '[...]', xs[-1]]
-    else:
-        return xs
-
-std_handler = Handler()
+def processed_to_stdout(states):
+    for state in states:
+        now = state.now
+        if now and not now.msgs:
+            print('\n>>>', '\n... '.join(shorter(now.code.strip().split('\n'))))
+        elif now and now.msgs:
+            msg = now.msgs[-1]
+            msg_to_stdout(msg)
 
 def test():
     with kernel() as k:
-        class TestHandler(Handler):
-            def executing(_, part, **metadata):
-                # print('>>>', part)
-                pass
-
-            def error(_, ename, evalue, traceback, **metadata):
-                o_hat.append(evalue)
-
-            def stream(_, text, stream, **metadata):
-                o_hat.append(text)
-
-            def data(_, mimes, **metadata):
-                o_hat.append(mimes.get('text/plain'))
-
-            def complete(_, ms):
-                o_hat.append(ms)
-
-            def md5(_, text, **metadata):
-                o_hat.append(hashlib.md5(text.encode()).hexdigest()[:6])
-
-            inspect = immediate = md5
-
-            def __getitem__(self, item):
-                return getattr(self, item)
-
-        test_handler = TestHandler()
+        def md5(text):
+            return hashlib.md5(text.encode()).hexdigest()[:6]
 
         for i, o in test_cases:
             o_hat = []
             if isinstance(i, str):
                 i = unindent(i)
-                k.process(i, test_handler)
+                for msg in processed_messages(k.process(i)):
+                    if msg.type == 'error':
+                        o_hat.append(msg.evalue)
+                    else:
+                        txt = msg.data['text/plain']
+                        if 'Docstring' in txt:
+                            o_hat.append(md5(txt))
+                        else:
+                            o_hat.append(txt)
+
             else:
                 cmd, s = i
-                for res in k[cmd](s, len(s), test_handler):
-                    test_handler[cmd](res)
+                res = k[cmd](s, len(s))
+                if cmd == 'complete':
+                    o_hat.append(res)
+                else:
+                    res = '\n'.join(l for l in res.split('\n') if 'File' not in l)
+                    o_hat.append(md5(res))
             if o != o_hat:
                 print('BAD', o, o_hat)
             else:
@@ -306,11 +351,11 @@ def test():
         print('\n-------------\n')
         for i, _o in test_cases:
             if isinstance(i, str):
-                k.process(i, std_handler)
+                processed_to_stdout(k.process(unindent(i)))
             else:
                 cmd, s = i
-                for msg in k[cmd](s, len(s), std_handler):
-                    print(msg)
+                res = k[cmd](s, len(s))
+                print(res)
 
 def filter_completions(xs):
     normal = any(not x.name.startswith('_') for x in xs)
@@ -382,14 +427,7 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
             ]
             completions(matches, args)
 
-    def process(timestamp, _timestamp_flag_lines, *flag_lines):
-
-        offset = 2
-        # ['12|\ue000', '14|\ue002']
-        # {'12': '\ue000', '14': '\ue002'}
-        flag_lines = [x.split('|') for x in flag_lines if '|' in x]
-        flag_lines = {int(k) - offset: v for k, v in flag_lines}
-        state = dotdict(lastline = -offset)
+    def process(timestamp, _timestamp_flag_lines, *prev_flag_lines):
 
         def b64_json(data):
             json_obj = json.dumps(data).encode()
@@ -397,39 +435,49 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
             return b64_str.replace('\n', '').replace('=', '\\=')
 
         def set_char(char, value):
-            send(f'set -add window ui_options neptyne_{ord(char)}={value}')
+            return f'set -add window ui_options neptyne_{ord(char)}={value}'
 
-        def encoded_send(**data):
-            # pprint(data)
-            line = data['line']
-            char = flag_lines[line]
-            set_char(char, b64_json(data))
+        offset = 3
+        # ['12|\ue000', '14|\ue002']
+        # {'12': '\ue000', '14': '\ue002'}
+        prev_flag_lines = [x.split('|') for x in prev_flag_lines if '|' in x]
+        prev_flag_lines = {int(k) - offset: v for k, v in prev_flag_lines}
 
-        class ProcessHandler():
-            def executing(_, part, line):
-                for line_inbetween in range(state.lastline, line):
-                    if line_inbetween in flag_lines:
-                        freed_char = flag_lines.pop(line_inbetween)
-                        pua_pool.pop(freed_char)
-                        set_char(freed_char, '')
-                if line in flag_lines:
-                    char = flag_lines[line]
-                else:
-                    char = flag_lines[line] = pua_pool.add(line)
-                state.lastline = line+1
+        sent = set()
+        first = True
+        for state in kernel.process(body):
+            msgs = []
+
+            if first:
+                # assign a PUA char to each line, reusing if possible
+                first = False
+                flag_lines = {}
+                for blob in state.all:
+                    line = blob.line_end
+                    if line in prev_flag_lines:
+                        flag_lines[line] = prev_flag_lines[line]
+                    else:
+                        flag_lines[line] = pua_pool.add(line)
+
                 spec = ' '.join(f'{l + offset}|{c}' for l, c in flag_lines.items())
-                send(f'set window neptyne_flags {timestamp} {spec}')
-                # encoded_send(command='executing', line=line)
+                msgs.append(f'set window neptyne_flags {timestamp} {spec}')
 
-            def __getattr__(_, command):
-                return lambda *args, line, **kws: encoded_send(
-                        command=command,
-                        args=args,
-                        line=line,
-                        **kws) or command == 'error'
+                for old_line, old_char in prev_flag_lines.items():
+                    if old_line not in flag_lines:
+                        pua_pool.pop(old_char)
+                        msgs.append(set_char(old_char, ''))
 
-        # print('processing', body)
-        kernel.process(body, ProcessHandler())
+            if state.now:
+                print(state.now.status, state.now.line_end)
+
+            for blob in state.all:
+                if blob.id not in sent:
+                    print('sending', blob.line_end, blob.status, 'id=' + str(blob.id))
+                    sent.add(blob.id)
+                    msgs.append(set_char(flag_lines[blob.line_end], b64_json(blob)))
+                    # here we could send simplified text msgs (remove ansi escapes and so on)
+
+            send('\n'.join(msgs))
 
     def inspect():
         for text in kernel.inspect(body, pos, std_handler):
@@ -444,29 +492,6 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
             send(msg)
 
     def jedi_icomplete(line, column):
-        # We run the jedi command inside the kernel
-        def _doit(*args, **kws):
-            import jedi
-            import json
-            i = jedi.Interpreter(*args, **kws)
-            cs = i.completions()
-            d = [dict(name=c.name, complete=c.complete, docstring=c.docstring()) for c in cs]
-            print(json.dumps(d))
-
-        def on_reply(s, *_):
-            try:
-                matches = json.loads(s)
-            except:
-                return
-            completions(matches, args)
-
-        doit_s = inspect.getsource(_doit)
-        h = dotdict()
-        h.stream = on_reply
-        h.text = lambda *_: None
-        h.immediate = lambda *_: None
-        h.executing = lambda *_: None
-
         # zap lines above current blob (to preserve line number)
         lines = []
         ok = True
@@ -479,7 +504,25 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
                 lines.append('')
         body = '\n'.join(lines[::-1])
 
-        kernel.process_part(f'{doit_s}\n_doit({body!r}, namespaces=[locals(), globals()], line={line}, column={column-1})', h)
+        # We run the jedi command inside the kernel
+        def _jedi_complete(*args, **kws):
+            import jedi
+            import json
+            i = jedi.Interpreter(*args, **kws)
+            cs = i.completions()
+            d = [dict(name=c.name, complete=c.complete, docstring=c.docstring()) for c in cs]
+            print(json.dumps(d))
+
+        jedi_complete_s = inspect.getsource(_jedi_complete)
+
+        for msg in processed_messages(kernel.process_part(f'{jedi_complete_s}\n_jedi_complete({body!r}, namespaces=[locals(), globals()], line={line}, column={column-1})')):
+            if msg.type == 'stream':
+                s = msg.data['text/plain']
+                try:
+                    matches = json.loads(s)
+                except:
+                    return
+                completions(matches, args)
 
     def jedi(subcmd, *args):
         import jedi
@@ -519,7 +562,9 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
         locals()[cmd](*args)
 
 import os
-if __name__ == '__main__' and 'MPLBACKEND' not in os.environ:
+if 'MPLBACKEND' in os.environ:
+    test()
+elif __name__ == '__main__':
     import sys
     if sys.argv[1:2] == ['test']:
         test()
@@ -536,7 +581,7 @@ if __name__ == '__main__' and 'MPLBACKEND' not in os.environ:
         with kernel() as k:
             for f in watched_files:
                 try:
-                    k.process(open(f, 'r').read(), std_handler)
+                    processed_to_stdout(k.process(open(f, 'r').read()))
                 except FileNotFoundError:
                     pass
             for event in i.event_gen(yield_nones=False):
@@ -544,7 +589,7 @@ if __name__ == '__main__' and 'MPLBACKEND' not in os.environ:
                 # print(event_type, filename)
 
                 if event_type == ['IN_CLOSE_WRITE'] and filename in watched_files:
-                    k.process(open(filename, 'r').read(), std_handler)
+                    processed_to_stdout(k.process(open(filename, 'r').read()))
 
                 if event_type == ['IN_CLOSE_WRITE'] and filename == '.requests':
                     try:
