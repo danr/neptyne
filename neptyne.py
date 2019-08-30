@@ -184,7 +184,7 @@ def kernel(kernel_name='python'):
 
         def process(i, handler):
             nonlocal prevs
-            prevs = []
+            # prevs = []
             parts = [ dbg(p) for p in re.split(r'(\n\n(?=\S))', i) ]
             zipped = list(zip_longest(parts, prevs))
             same, zipped = span(lambda part, prev: trim(prev) == trim(part), zipped)
@@ -322,7 +322,7 @@ def filter_completions(xs):
 def info(s):
     return 'info -style menu "' + qq(s) + '"'
 
-class Resource():
+class Pool():
     def __init__(self, keys):
         self.free = set(keys)
         self.map = dotdict()
@@ -347,7 +347,7 @@ class Resource():
 
 PUAs = {chr(x) for x in range(0xe000, 0xf8ff)}
 
-def handle_request(kernel, body, cmd, pos, client, session, *args, flags=Resource(PUAs)):
+def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool(PUAs)):
 
     pos = int(pos)
 
@@ -384,11 +384,10 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, flags=Resourc
 
     def process(timestamp, _timestamp_flag_lines, *flag_lines):
 
+        offset = 2
         # ['12|\ue000', '14|\ue002']
         # {'12': '\ue000', '14': '\ue002'}
-        offset = 2
         flag_lines = [x.split('|') for x in flag_lines if '|' in x]
-        print(flag_lines)
         flag_lines = {int(k) - offset: v for k, v in flag_lines}
         state = dotdict(lastline = -offset)
 
@@ -397,26 +396,27 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, flags=Resourc
             b64_str = codecs.encode(json_obj, 'base64').decode()
             return b64_str.replace('\n', '').replace('=', '\\=')
 
-
         def set_char(char, value):
             send(f'set -add window ui_options neptyne_{ord(char)}={value}')
 
         def encoded_send(**data):
-            pprint(data)
+            # pprint(data)
             line = data['line']
             char = flag_lines[line]
             set_char(char, b64_json(data))
 
         class ProcessHandler():
             def executing(_, part, line):
-                for prev in range(state.lastline, line+1):
-                    if prev in flag_lines:
-                        char = flag_lines.pop(prev)
-                        flags.pop(char)
-                        set_char(char, '')
+                for line_inbetween in range(state.lastline, line):
+                    if line_inbetween in flag_lines:
+                        freed_char = flag_lines.pop(line_inbetween)
+                        pua_pool.pop(freed_char)
+                        set_char(freed_char, '')
+                if line in flag_lines:
+                    char = flag_lines[line]
+                else:
+                    char = flag_lines[line] = pua_pool.add(line)
                 state.lastline = line+1
-                char = flags.add(line)
-                flag_lines[line] = char
                 spec = ' '.join(f'{l + offset}|{c}' for l, c in flag_lines.items())
                 send(f'set window neptyne_flags {timestamp} {spec}')
                 # encoded_send(command='executing', line=line)
@@ -426,9 +426,9 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, flags=Resourc
                         command=command,
                         args=args,
                         line=line,
-                        **kws)
+                        **kws) or command == 'error'
 
-        print('processing', body)
+        # print('processing', body)
         kernel.process(body, ProcessHandler())
 
     def inspect():
