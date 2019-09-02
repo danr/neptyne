@@ -434,9 +434,6 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
             b64_str = codecs.encode(json_obj, 'base64').decode()
             return b64_str.replace('\n', '').replace('=', '\\=')
 
-        def set_char(char, value):
-            return f'set -add window ui_options neptyne_{ord(char)}={value}'
-
         offset = 3
         # ['12|\ue000', '14|\ue002']
         # {'12': '\ue000', '14': '\ue002'}
@@ -447,6 +444,8 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
         first = True
         for state in kernel.process(body):
             msgs = []
+
+            chars = {}
 
             if first:
                 # assign a PUA char to each line, reusing if possible
@@ -460,12 +459,15 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
                         flag_lines[line] = pua_pool.add(line)
 
                 spec = ' '.join(f'{l + offset}|{c}' for l, c in flag_lines.items())
-                msgs.append(f'set window neptyne_flags {timestamp} {spec}')
+                msgs.append(f'''
+                    set window neptyne_flags {timestamp} {spec}
+                    set window ui_options ncurses_assistant=none  # clear ui_options
+                ''')
 
                 for old_line, old_char in prev_flag_lines.items():
                     if old_line not in flag_lines:
                         pua_pool.pop(old_char)
-                        msgs.append(set_char(old_char, ''))
+                        # msgs.append(set_char(old_char, ''))
 
             if state.now:
                 print(state.now.status, state.now.line_end)
@@ -474,9 +476,11 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
                 if blob.id not in sent:
                     print('sending', blob.line_end, blob.status, 'id=' + str(blob.id))
                     sent.add(blob.id)
-                    msgs.append(set_char(flag_lines[blob.line_end], b64_json(blob)))
+                    chars[flag_lines[blob.line_end]] = blob
                     # here we could send simplified text msgs (remove ansi escapes and so on)
 
+            ui_options = ' '.join(f'neptyne_{ord(char)}={b64_json(value)}' for char, value in chars.items())
+            msgs.append(f'set -add window ui_options {ui_options}')
             send('\n'.join(msgs))
 
     def inspect():
