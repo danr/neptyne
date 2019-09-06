@@ -8,7 +8,7 @@ map global insert <a-s> '<a-;>: neptyne_jedi sig<ret>'
 map global insert <a-g> '<a-;>: neptyne_jedi goto<ret>'
 map global insert <a-h> '<a-;>: neptyne_inspect normal<ret>'
 map global insert <a-w> '<a-;>: write<ret>'
-map global normal <a-h> ': neptyne_inspect<ret>'
+map global normal <a-h> ': neptyne_inspect normal<ret>'
 
 try %{
     decl -hidden str _neptyne_location %val{source}

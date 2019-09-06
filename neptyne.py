@@ -1,7 +1,6 @@
 import jupyter_client as jc
 import hashlib
 import re
-import inspect
 import json
 import codecs
 import time
@@ -367,32 +366,23 @@ def filter_completions(xs):
 def info(s):
     return 'info -style menu "' + qq(s) + '"'
 
-class Pool():
-    def __init__(self, keys):
-        self.free = set(keys)
-        self.map = dotdict()
 
-    def pop(self, key):
-        self.free.add(key)
-        try:
-            del self.map[key]
-        except KeyError:
-            pass
+def tqdm_process(p):
+    try:
+        import tqdm
+    except ImportError:
+        return p
+    with tqdm.tqdm(unit='cells') as t:
+        for state in p:
+            t.total = len(state.all)
+            x = len(state.done) - t.n
+            if x >= 0: t.update(x)
+            if state.now:
+                now = state.now
+                t.set_postfix(line=now.line_end, status=now.status, id=now.id)
+            yield state
 
-    def add(self, value):
-        key = self.free.pop()
-        self.map[key] = value
-        return key
-
-    def __getitem__(self, key):
-        return self.map[key]
-
-    def __setitem__(self, key, value):
-        self.map[key] = value
-
-PUAs = {chr(x) for x in range(0xe000, 0xf8ff)}
-
-def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool(PUAs)):
+def handle_request(kernel, body, cmd, pos, client, session, *args):
 
     pos = int(pos)
 
@@ -403,29 +393,6 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
         p.stdin.flush()
         p.stdin.close()
         p.wait()
-
-    def completions(matches, args):
-        line, column = map(int, args[:2])
-        _, _, neptyne_completions, timestamp = args
-        matches = filter_completions(list(map(dotdict, matches)))
-        if not matches:
-            return
-        qqc = lambda m: qq(completion_esc(m))
-        msg = ['"' + qqc(m.name) + '|' + qqc(m.doccmd or info(m.docstring)) + '|' + qqc(m.name) + '"' for m in matches]
-        m0 = matches[0]
-        dist = len(m0.name) - len(m0.complete)
-        cmd = ['set window', neptyne_completions, str(line) + '.' + str(column - dist) + '@' + timestamp]
-        msg = ' '.join(cmd + msg)
-        send(msg)
-
-
-    def complete():
-        for reply in kernel.complete(body, pos, std_handler):
-            matches = [
-                dict(name=m, complete=m, doccmd='neptyne_inspect menu')
-                for m in reply
-            ]
-            completions(matches, args)
 
     def process(timestamp, _timestamp_flag_lines, *prev_flag_lines):
 
@@ -442,7 +409,9 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
 
         sent = set()
         first = True
-        for state in kernel.process(body):
+        pua_pool = {chr(x) for x in range(0xe000, 0xf8ff)}
+        for state in tqdm_process(kernel.process(body)):
+
             msgs = []
 
             chars = {}
@@ -455,8 +424,9 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
                     line = blob.line_end
                     if line in prev_flag_lines:
                         flag_lines[line] = prev_flag_lines[line]
+                        pua_pool.remove(flag_lines[line])
                     else:
-                        flag_lines[line] = pua_pool.add(line)
+                        flag_lines[line] = pua_pool.pop()
 
                 spec = ' '.join(f'{l + offset}|{c}' for l, c in flag_lines.items())
                 msgs.append(f'''
@@ -464,17 +434,9 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
                     set window ui_options ncurses_assistant=none  # clear ui_options
                 ''')
 
-                for old_line, old_char in prev_flag_lines.items():
-                    if old_line not in flag_lines:
-                        pua_pool.pop(old_char)
-                        # msgs.append(set_char(old_char, ''))
-
-            if state.now:
-                print(state.now.status, state.now.line_end)
-
             for blob in state.all:
                 if blob.id not in sent:
-                    print('sending', blob.line_end, blob.status, 'id=' + str(blob.id))
+                    # print('sending', blob.line_end, blob.status, 'id=' + str(blob.id))
                     sent.add(blob.id)
                     chars[flag_lines[blob.line_end]] = blob
                     # here we could send simplified text msgs (remove ansi escapes and so on)
@@ -483,22 +445,43 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
             msgs.append(f'set -add window ui_options {ui_options}')
             send('\n'.join(msgs))
 
-    def inspect():
-        for text in kernel.inspect(body, pos, std_handler):
-            print('\n' + text)
-            where, *args = args
-            width, height = map(int, args)
-            msg = unansi(text)
-            msg = [line[:width-8] for line in msg.split('\n')]
-            msg = '\n'.join(msg[:height-8])
-            style = '-style menu' if where == 'menu' else ''
-            msg = f'info {style} "{qq(msg)}"'
-            send(msg)
+    def inspect(where, w, h):
+        text = kernel.inspect(body, pos)
+        print('\n' + text)
+        width, height = map(int, [w, h])
+        msg = unansi(text)
+        msg = [line[:width-8] for line in msg.split('\n')]
+        msg = '\n'.join(msg[:height-8])
+        style = '-style menu' if where == 'menu' else ''
+        msg = f'info {style} "{qq(msg)}"'
+        send(msg)
 
-    def jedi_icomplete(line, column):
+    def completions(matches, l, c, neptyne_completions, timestamp):
+        line, column = map(int, [l, c])
+        matches = filter_completions(list(map(dotdict, matches)))
+        if not matches:
+            return
+        qqc = lambda m: qq(completion_esc(m))
+        msg = ['"' + qqc(m.name) + '|' + qqc(m.doccmd or info(m.docstring)) + '|' + qqc(m.name) + '"' for m in matches]
+        m0 = matches[0]
+        dist = len(m0.name) - len(m0.complete)
+        cmd = ['set window', neptyne_completions, str(line) + '.' + str(column - dist) + '@' + timestamp]
+        msg = ' '.join(cmd + msg)
+        send(msg)
+
+    def complete(*args):
+        reply = kernel.complete(body, pos)
+        matches = [
+            dict(name=m, complete=m, doccmd='neptyne_inspect menu')
+            for m in reply
+        ]
+        completions(matches, *args)
+
+    def jedi_icomplete(line, column, args):
         # zap lines above current blob (to preserve line number)
         lines = []
         ok = True
+        nonlocal body
         for l in body.split('\n')[:line][::-1]:
             if not l:
                 ok = False
@@ -517,33 +500,36 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
             d = [dict(name=c.name, complete=c.complete, docstring=c.docstring()) for c in cs]
             print(json.dumps(d))
 
+        import inspect
         jedi_complete_s = inspect.getsource(_jedi_complete)
 
-        for msg in processed_messages(kernel.process_part(f'{jedi_complete_s}\n_jedi_complete({body!r}, namespaces=[locals(), globals()], line={line}, column={column-1})')):
+        cell = f'{jedi_complete_s}\n_jedi_complete({body!r}, namespaces=[locals(), globals()], line={line}, column={column-1})'
+
+        for msg in kernel.process_part(cell):
             if msg.type == 'stream':
                 s = msg.data['text/plain']
                 try:
                     matches = json.loads(s)
                 except:
                     return
-                completions(matches, args)
+                completions(matches, *args)
 
     def jedi(subcmd, *args):
         import jedi
-        line, column = map(int, args)
+        line, column = map(int, args[:2])
         try:
             script = jedi.Script(body, line, column - 1) # , watched_file)
         except:
             print('jedi failed')
             return
         if subcmd == 'icomplete':
-            jedi_icomplete(line, column)
-        if subcmd == 'complete':
+            jedi_icomplete(line, column, args)
+        elif subcmd == 'complete':
             matches = [
                 dict(name=m.name, complete=m.complete, docstring=m.docstring())
                 for m in script.completions()
             ]
-            completions(matches, args)
+            completions(matches, *args)
         elif subcmd == 'docstring':
             try:
                 print(script.goto_definitions()[0].docstring())
@@ -557,7 +543,7 @@ def handle_request(kernel, body, cmd, pos, client, session, *args, pua_pool=Pool
         elif subcmd == 'goto':
             pprint(script.goto_definitions())
         else:
-            print('Invalid jedi command: ', subcmd)
+            print('Invalid jedi command: ', subcmd, repr(subcmd))
 
     if '_' in cmd:
         head, subcmd = cmd.split('_')
@@ -599,7 +585,7 @@ elif __name__ == '__main__':
                     try:
                         request, body = open(filename, 'r').read().split('\n', 1)
                         handle_request(k, body, *request.split(' '))
-                    except ValueError as e:
+                    except:
                         print('Invalid request:', str(open(filename, 'r').read()).split('\n')[0])
                         import traceback
                         print(traceback.format_exc())
