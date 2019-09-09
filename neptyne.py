@@ -109,8 +109,15 @@ def slices(s):
 def line_count(s):
     return len(re.findall(r'\n', s))
 
-def calculate_queue(body, prevs):
+def calculate_queue(body, prevs, movements={}):
     parts = slices(body)
+
+    prevs_by_line = {p.line_end: p for p in prevs}
+    prevs_by_line_range = {
+        prevs_by_line[prev_line].id
+        for _, prev_line in movements.items()
+        if prev_line in prevs_by_line
+    }
 
     changed = False
     line_begin = -1
@@ -127,7 +134,12 @@ def calculate_queue(body, prevs):
             if changed or (not prev or trim(prev.code) != trim(part) or prev.status == 'cancelled'):
                 changed = True
                 me.status = 'scheduled'
-                if prev and prev.msgs:
+                moved_line = movements.get(line_end)
+                if moved_line and moved_line in prevs_by_line:
+                    # Here: check movements, prefer to pick the prev at this line
+                    p = prevs_by_line[moved_line]
+                    me.prev_msgs = p.msgs
+                elif prev and prev.msgs and prev.id not in prevs_by_line_range:
                     me.prev_msgs = prev.msgs
             else:
                 me.status = 'done'
@@ -245,9 +257,9 @@ def kernel(kernel_name='python'):
 
         prevs = []
 
-        def process(body):
+        def process(body, movements={}):
             nonlocal prevs
-            queue = list(calculate_queue(body, prevs))
+            queue = list(calculate_queue(body, prevs, movements=movements))
             for fwd in process_queue(queue):
                 yield fwd
                 prevs = fwd.done
@@ -394,43 +406,58 @@ def handle_request(kernel, body, cmd, pos, client, session, *args):
         p.stdin.close()
         p.wait()
 
-    def process(timestamp, _timestamp_flag_lines, *prev_flag_lines):
+    def process(timestamp, _timestamp_flag_lines, *now_and_prev_flags):
+
+        offset = 3
+        def parse_flags(flags):
+            # ['12|\ue000', '14|\ue002']
+            # {'12': '\ue000', '14': '\ue002'}
+            flags = [x.split('|') for x in flags if '|' in x]
+            return {int(k) - offset: v for k, v in flags}
+
+        def invert(d):
+            return
+
+        for i, flag in enumerate(now_and_prev_flags):
+            if '|' not in flag:
+                now_flags = parse_flags(now_and_prev_flags[:i])
+                prev_flags = parse_flags(now_and_prev_flags[i+1:])
+                break
+        else:
+            now_flags = parse_flags(now_and_prev_flags)
+            prev_flags = {}
+
+        now_chars = {char: line for line, char in now_flags.items()}
+        movements = {}
+        for prev_line, char in prev_flags.items():
+            now_line = now_chars.get(char)
+            if now_line is not None:
+                movements[now_line] = prev_line
 
         def b64_json(data):
             json_obj = json.dumps(data).encode()
             b64_str = codecs.encode(json_obj, 'base64').decode()
             return b64_str.replace('\n', '').replace('=', '\\=')
 
-        offset = 3
-        # ['12|\ue000', '14|\ue002']
-        # {'12': '\ue000', '14': '\ue002'}
-        prev_flag_lines = [x.split('|') for x in prev_flag_lines if '|' in x]
-        prev_flag_lines = {int(k) - offset: v for k, v in prev_flag_lines}
-
         sent = set()
         first = True
-        pua_pool = {chr(x) for x in range(0xe000, 0xf8ff)}
-        for state in tqdm_process(kernel.process(body)):
-
+        for state in tqdm_process(kernel.process(body, movements=movements)):
             msgs = []
-
             chars = {}
 
             if first:
                 # assign a PUA char to each line, reusing if possible
                 first = False
-                flag_lines = {}
-                for blob in state.all:
-                    line = blob.line_end
-                    if line in prev_flag_lines:
-                        flag_lines[line] = prev_flag_lines[line]
-                        pua_pool.remove(flag_lines[line])
-                    else:
-                        flag_lines[line] = pua_pool.pop()
+                flag = {}
+                PUAs = (chr(x) for x in range(0xe000, 0xf8ff))
+                for blob, char in zip(state.all, PUAs):
+                    flag[blob.line_end] = char
+                    chars[char] = blob
 
-                spec = ' '.join(f'{l + offset}|{c}' for l, c in flag_lines.items())
+                spec = ' '.join(f'{l + offset}|{c}' for l, c in flag.items())
                 msgs.append(f'''
                     set window neptyne_flags {timestamp} {spec}
+                    set window neptyne_prev_flags {timestamp} {spec}
                     set window ui_options ncurses_assistant=none  # clear ui_options
                 ''')
 
@@ -438,7 +465,7 @@ def handle_request(kernel, body, cmd, pos, client, session, *args):
                 if blob.id not in sent:
                     # print('sending', blob.line_end, blob.status, 'id=' + str(blob.id))
                     sent.add(blob.id)
-                    chars[flag_lines[blob.line_end]] = blob
+                    chars[flag[blob.line_end]] = blob
                     # here we could send simplified text msgs (remove ansi escapes and so on)
 
             ui_options = ' '.join(f'neptyne_{ord(char)}={b64_json(value)}' for char, value in chars.items())

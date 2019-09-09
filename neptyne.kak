@@ -10,6 +10,10 @@ map global insert <a-h> '<a-;>: neptyne_inspect normal<ret>'
 map global insert <a-w> '<a-;>: write<ret>'
 map global normal <a-h> ': neptyne_inspect normal<ret>'
 
+rmhooks global neptyne
+hook -group neptyne global BufWritePost .*py %{ try neptyne_process }
+
+
 try %{
     decl -hidden str _neptyne_location %val{source}
     decl -hidden str _neptyne_tmp
@@ -61,15 +65,14 @@ def neptyne_inspect -params 1 %{
 def neptyne_process %{
     eval -draft -no-hooks %{
         try %{ decl line-specs neptyne_flags }
+        try %{ decl str-list neptyne_prev_flags }
         try %{ addhl window/ flag-lines default neptyne_flags }
         try %{ update-option window neptyne-flags }
         exec \%
-        echo -to-file .requests "process %val{cursor_byte_offset} %val{client} %val{session} %val{timestamp} %opt{neptyne_flags}
+        echo -to-file .requests "process %val{cursor_byte_offset} %val{client} %val{session} %val{timestamp} %opt{neptyne_flags} %opt{neptyne_prev_flags}
 %val{selection}"
     }
 }
-
-hook global BufWritePost .*py %{ try neptyne_process }
 
 def neptyne %{
     nop %sh{
