@@ -466,6 +466,16 @@ def handle_request(kernel, body, cmd, pos, client, session, *args):
                     # print('sending', blob.line_end, blob.status, 'id=' + str(blob.id))
                     sent.add(blob.id)
                     chars[flag[blob.line_end]] = blob
+                    for msg in blob.msgs or []:
+                        mimes = msg.data
+                        if mimes and 'json' not in mimes:
+                            plain = mimes.get('text/plain')
+                            if plain:
+                                try:
+                                    thing = eval(plain, {}, {})
+                                    mimes['json'] = json.dumps(thing, indent=2)
+                                except:
+                                    pass
                     # here we could send simplified text msgs (remove ansi escapes and so on)
 
             ui_options = ' '.join(f'neptyne_{ord(char)}={b64_json(value)}' for char, value in chars.items())
