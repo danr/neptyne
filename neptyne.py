@@ -472,8 +472,9 @@ def handle_request(kernel, body, cmd, pos, client, session, *args):
                             plain = mimes.get('text/plain')
                             if plain:
                                 try:
-                                    thing = eval(plain, {}, {})
-                                    mimes['json'] = json.dumps(thing, indent=2)
+                                    plain_data = eval(plain, {}, {})
+                                    json.dumps(plain_data) # check that it can be serialized
+                                    mimes['json'] = plain_data
                                 except:
                                     pass
                     # here we could send simplified text msgs (remove ansi escapes and so on)

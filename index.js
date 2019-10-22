@@ -295,12 +295,12 @@ function activate(domdiff, root, websocket, state) {
       }
       if (atoms && pua(atoms[0].contents)) {
         const codepoint = atoms[0].contents.charCodeAt(0)
-        const {dom, text, status} = state.neptyne_lines[codepoint]
+        const {dom, text, status, blob} = state.neptyne_lines[codepoint]
         const colours = {
           default: 'blue',
           cancelled: 'yellow',
           executing: 'green',
-          scheduled: 'cyan',
+          scheduled: 'magenta',
         }
         const border_colour = colours[status] || colours.default
         if (dom || text) {
@@ -321,6 +321,7 @@ function activate(domdiff, root, websocket, state) {
                   e.preventDefault()
                 }
               }),
+              // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(blob, 2, 2)),
               css`
                 color:${color_to_css('white')};
                 background: linear-gradient(to bottom right, ${color_to_css('bright-green')} 20%, ${color_to_css('black')});
@@ -427,6 +428,7 @@ function activate(domdiff, root, websocket, state) {
   window.update_flags = function update_flags() {
 
     function with_msg(blob, line, msg) {
+      // console.log(blob)
       const mimes = msg.data
       if (mimes) {
         const html = mimes['text/html']
@@ -516,7 +518,8 @@ function activate(domdiff, root, websocket, state) {
         state.neptyne_lines[codepoint] = {
           status: blob.status,
           dom: null,
-          text: ''
+          text: '',
+          blob,
         }
         const line = state.neptyne_lines[codepoint]
         if (blob.msgs && !nothing_yet && !previous_images) {
