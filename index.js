@@ -310,7 +310,17 @@ function activate(domdiff, root, websocket, state) {
             (dom ? div : pre)(
               dom ? dom : text,
               cls(status),
-              mousewheel(e => e.stopPropagation()),
+              domdiff.click(e => {
+                state.scroll_selected = codepoint
+                e.stopPropagation()
+              }),
+              mousewheel(e => {
+                if (state.scroll_selected == codepoint) {
+                  e.stopPropagation()
+                } else {
+                  e.preventDefault()
+                }
+              }),
               css`
                 color:${color_to_css('white')};
                 background: linear-gradient(to bottom right, ${color_to_css('bright-green')} 20%, ${color_to_css('black')});
@@ -322,7 +332,7 @@ function activate(domdiff, root, websocket, state) {
                 z-index: 1;
                 border-left: 0.1em ${color_to_css(border_colour)} solid;
                 overflow: overlay;
-                max-height: 80vh;
+                max-height: 50vh;
                 font-size: 0.9em;
                 order:-1;
               `))
@@ -480,6 +490,12 @@ function activate(domdiff, root, websocket, state) {
 
     state.neptyne_lines = {}
 
+    const {ncurses_set_title: title} = ui_options
+    if (title) {
+      document.title = title
+    }
+
+
     Object.keys(ui_options).forEach(k => {
       const m = k.match(/^neptyne_(\d+)$/)
       if (!m) {
@@ -577,16 +593,14 @@ function activate(domdiff, root, websocket, state) {
   window.onresize = () => schedule_refresh()
 
   window.onmousewheel = e => {
-    // e.preventDefault()
     if (!e.deltaX) {
-      // this is getting changed in kakoune 2359df0f
-      // send("scroll", e.deltaY)
-      if (e.deltaY < 0) {
-        send("mouse", "wheel_up", 0, 0)
-      } else {
-        send("mouse", "wheel_down", 0, 0)
-      }
+      state.scroll_selected = undefined
+      send("scroll", Math.round(e.deltaY / 20))
     }
+  }
+
+  window.onclick = e => {
+    state.scroll_selected = undefined
   }
 
   update_flags()
