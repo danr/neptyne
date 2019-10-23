@@ -65,7 +65,7 @@ function color_to_css(name, fallback) {
 
 function activate(domdiff, root, websocket, state) {
 
-  const { div, pre, style, cls, id, class_cache, mousewheel } = domdiff
+  const { div, pre, style, cls, id, class_cache, mousewheel, scroll } = domdiff
 
   const {sheet, css, generate_class} = class_cache()
 
@@ -305,6 +305,7 @@ function activate(domdiff, root, websocket, state) {
         const border_colour = colours[status] || colours.default
         if (dom || text) {
           line_extra.push(
+            domdiff.key(codepoint),
             FlexColumnLeft,
             css`align-items: stretch`,
             (dom ? div : pre)(
