@@ -1,4 +1,3 @@
-
 const atoms_text = atoms => atoms.map(atom => atom.contents).join('')
 
 const NAMED_KEYS = {
@@ -65,7 +64,9 @@ function color_to_css(name, fallback) {
 
 function activate(domdiff, root, websocket, state) {
 
-  const { div, pre, style, cls, id, class_cache, mousewheel, scroll } = domdiff
+  let first_paint = true
+
+  const { div, span, pre, style, cls, id, class_cache, mousewheel, scroll } = domdiff
 
   const {sheet, css, generate_class} = class_cache()
 
@@ -122,13 +123,17 @@ function activate(domdiff, root, websocket, state) {
     }
     pre, body {
       font-size: 22px;
-      // font-family: 'Luxi Mono';
+      // font-family: 'Source Serif Pro';
       font-family: 'Consolas';
-      letter-spacing: -0.025em;
+      letter-spacing: -0.04em;
+      font-weight: 400 !important;
     }
     body {
       margin: 0;
       overflow: hidden;
+    }
+    span {
+      white-space: pre;
     }
   `
 
@@ -193,7 +198,7 @@ function activate(domdiff, root, websocket, state) {
                 return Math.floor(x / w) + offset
               }),
               ...ensure_nonempty(atoms).map(cell =>
-                pre(
+                span(
                   face_to_style(cell.face, default_face),
                   cell.contents.replace(/\n/g, ' ')
                 )),
@@ -210,8 +215,6 @@ function activate(domdiff, root, websocket, state) {
     rAF(actual_refresh)
     rAF = x => 0
   }
-
-  state.first_paint = true
 
   function actual_refresh() {
 
@@ -367,8 +370,8 @@ function activate(domdiff, root, websocket, state) {
 
     morph(root)
 
-    if (state.first_paint) {
-      state.first_paint = false
+    if (first_paint) {
+      first_paint = false
       if (state.resize_observer) {
         state.resize_observer.disconnect()
       }
@@ -399,6 +402,7 @@ function activate(domdiff, root, websocket, state) {
 
       const cell_width = inline_rect.width / inline.textContent.length
       const block_width = Math.min(block_rect.right, line_rect.right) - block_rect.left
+      // console.log({line_rect, block_rect, inline_rect, cell_width, block_width})
       columns.push(Math.floor(block_width / cell_width))
 
       const slack_bottom = line_rect.top + block_rect.height
@@ -417,6 +421,7 @@ function activate(domdiff, root, websocket, state) {
       }
     })
     next.cols = Math.min(...columns) + state.offset
+    // console.log({columns, ...next})
 
     if (next.cols != state.cols || next.rows != state.rows) {
       Object.assign(state, next)

@@ -184,12 +184,34 @@ export const div = MakeTag('div')
 export const pre = MakeTag('pre')
 export const code = MakeTag('code')
 export const span = MakeTag('span')
+export const body = MakeTag('body')
+export const head = MakeTag('head')
+export const html = MakeTag('html')
+
+export const h1 = MakeTag('h1')
+export const h2 = MakeTag('h2')
+export const h3 = MakeTag('h3')
+export const h4 = MakeTag('h4')
+export const h5 = MakeTag('h5')
+export const h6 = MakeTag('h6')
+export const h7 = MakeTag('h7')
+
+export const table = MakeTag('table')
+export const tbody = MakeTag('tbody')
+export const thead = MakeTag('thead')
+export const tfoot = MakeTag('tfoot')
+export const tr = MakeTag('tr')
+export const td = MakeTag('td')
+export const th = MakeTag('th')
+
+export const a = MakeTag('a')
 
 export const MakeAttr = attr => forward(template_to_string, value => ({attr, value}))
 
 export const style = MakeAttr('style')
 export const cls = MakeAttr('class')
 export const id = MakeAttr('id')
+export const href = MakeAttr('href')
 
 export const Handler = handler => value => ({handler, value})
 
