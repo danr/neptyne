@@ -4,7 +4,7 @@ function template_to_string(value, ...more) {
   if (typeof value == 'string') {
     return value
   }
-  return value.map((s, i) => s + (more[i] || '')).join('')
+  return value.map((s, i) => s + (more[i] === undefined ? '' : more[i])).join('')
 }
 
 function forward(f, g) {
@@ -88,10 +88,17 @@ export function Tag(name, children) {
   const next_keys = Object.fromEntries(children.filter(ch => ch.key).map(ch => [ch.key, true]))
   const any_next_keys = Object.keys(next_keys).length > 0
 
-  function morph(elem) {
+  function morph(elem, ns) {
+    if (name == 'svg') {
+      ns = 'http://www.w3.org/2000/svg'
+    }
     if (!elem || !isElement(elem) || elem.tagName != name.toUpperCase() || elem.foreign) {
       // need to create a new node if this is a FOREIGN OBJECT
-      elem = document.createElement(name)
+      if (ns) {
+        elem = document.createElementNS(ns, name)
+      } else {
+        elem = document.createElement(name)
+      }
     }
     for (const attr of elem.attributes) {
       if (!next_attrs[attr.name]) {
@@ -142,7 +149,7 @@ export function Tag(name, children) {
         const prev = elem.childNodes[i]
         let next = child
         if (typeof child == 'function') {
-          next = child(prev)
+          next = child(prev, ns)
         } else if (typeof child == 'string') {
           if (prev instanceof Text && prev.textContent == child) {
             next = prev
@@ -154,7 +161,7 @@ export function Tag(name, children) {
           elem.replaceChild(next, prev)
         }
       } else {
-        elem.append(typeof child == 'function' ? child() : child)
+        elem.append(typeof child == 'function' ? child(null, ns) : child)
       }
     }
     while (elem.childNodes.length > children.length) {
