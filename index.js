@@ -432,6 +432,7 @@ function activate(domdiff, root, websocket, state) {
       // console.log(blob)
       const mimes = msg.data
       if (mimes) {
+        console.log(mimes)
         const html = mimes['text/html']
         const svg = mimes['image/svg+xml']
         const png = mimes['image/png']
@@ -584,7 +585,6 @@ function activate(domdiff, root, websocket, state) {
   }
 
   window.onkeydown = e => {
-    e.preventDefault()
     const key = e.key
     if (key in NAMED_KEYS) {
       send("keys", mod(NAMED_KEYS[key], e))

@@ -1,7 +1,7 @@
 
-map global insert <a-C> '<a-;>: neptyne_setup; neptyne_complete<ret>'
+map global insert <a-c> '<a-;>: neptyne_setup; neptyne_complete<ret>'
 map global insert <a-i> '<a-;>: neptyne_setup; neptyne_jedi icomplete<ret>'
-map global insert <a-c> '<a-;>: neptyne_setup; neptyne_jedi complete<ret>'
+map global insert <a-j> '<a-;>: neptyne_setup; neptyne_jedi complete<ret>'
 map global insert <a-d> '<a-;>: neptyne_jedi docstring<ret>'
 map global insert <a-z> '<a-;>: neptyne_jedi usages<ret>'
 map global insert <a-s> '<a-;>: neptyne_jedi sig<ret>'
@@ -11,7 +11,7 @@ map global insert <a-w> '<a-;>: write<ret>'
 map global normal <a-h> ': neptyne_inspect normal<ret>'
 
 rmhooks global neptyne
-hook -group neptyne global BufWritePost .*py %{ try neptyne_process }
+hook -group neptyne global BufWritePost .*(py|go|rb) %{ try neptyne_process }
 
 
 try %{

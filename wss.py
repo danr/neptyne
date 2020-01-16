@@ -7,6 +7,9 @@ import aiohttp
 from aiohttp import web
 from asyncio.subprocess import PIPE
 
+import logging
+import sys
+
 app = web.Application()
 routes = web.RouteTableDef()
 
@@ -140,25 +143,14 @@ async def inotify_websocket(request):
 
 app.router.add_routes(routes)
 
-loop = asyncio.get_event_loop()
-if not loop.is_running():
-    import logging
+def main():
+    loop = asyncio.get_event_loop()
     logging.basicConfig(level=logging.DEBUG)
-    import sys
     try:
         port = int(sys.argv[1])
     except:
         port = 8234
     web.run_app(app, host='127.0.0.1', port=port, access_log_format='%t %a %s %r')
-else:
-    if 'runner' in globals() and runner is not None:
-        asyncio.ensure_future(runner.cleanup())
-    runner = None
-    async def make_runner():
-        global runner
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, '127.0.0.1', 8234)
-        await site.start()
-    asyncio.ensure_future(make_runner())
 
+if __name__ == 'main':
+    main()

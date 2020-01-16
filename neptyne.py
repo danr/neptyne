@@ -5,6 +5,10 @@ import json
 import codecs
 import time
 
+import os
+import sys
+import tqdm
+
 from pprint import pprint
 from itertools import zip_longest
 from contextlib import contextmanager
@@ -158,8 +162,10 @@ def __dbg__unused__(part):
         return line
     return '\n'.join(map(dbg_, part.split('\n')))
 
+import os
+
 @contextmanager
-def kernel(kernel_name='python'):
+def kernel(kernel_name=os.environ.get('KERNEL', 'python3')):
     with jc.run_kernel(kernel_name=kernel_name, stdin=False) as kc:
         # print('got kernel')
         def wait_idle():
@@ -380,10 +386,6 @@ def info(s):
 
 
 def tqdm_process(p):
-    try:
-        import tqdm
-    except ImportError:
-        return p
     with tqdm.tqdm(unit='cells') as t:
         for state in p:
             t.total = len(state.all)
@@ -484,6 +486,7 @@ def handle_request(kernel, body, cmd, pos, client, session, *args):
             send('\n'.join(msgs))
 
     def inspect(where, w, h):
+        return
         text = kernel.inspect(body, pos)
         print('\n' + text)
         width, height = map(int, [w, h])
@@ -583,50 +586,52 @@ def handle_request(kernel, body, cmd, pos, client, session, *args):
         else:
             print('Invalid jedi command: ', subcmd, repr(subcmd))
 
+    print(cmd, pos, client, session, *args)
     if '_' in cmd:
         head, subcmd = cmd.split('_')
         locals()[head](subcmd, *args)
     else:
         locals()[cmd](*args)
 
-import os
+def main():
+    from inotify.adapters import Inotify
+    i = Inotify()
+    i.add_watch('.')
+    watched_files = sys.argv[1:]
+    # watched_file = (sys.argv + [None])[1]
+    # import os
+    # common = os.path.commonpath([os.getcwd(), watched_file])
+    # watched_file = watched_file[1+len(common):]
+    # print(common, watched_file)
+    with kernel() as k:
+        for f in watched_files:
+            try:
+                processed_to_stdout(k.process(open(f, 'r').read()))
+            except FileNotFoundError:
+                pass
+        for event in i.event_gen(yield_nones=False):
+            (_, event_type, _, filename) = event
+            # print(event_type, filename)
+
+            if event_type == ['IN_CLOSE_WRITE'] and filename in watched_files:
+                processed_to_stdout(k.process(open(filename, 'r').read()))
+
+            if event_type == ['IN_CLOSE_WRITE'] and filename == '.requests':
+                try:
+                    request, body = open(filename, 'r').read().split('\n', 1)
+                    handle_request(k, body, *request.split(' '))
+                except:
+                    print('Invalid request:', str(open(filename, 'r').read()).split('\n')[0])
+                    import traceback
+                    print(traceback.format_exc())
+                    continue
+
 if 'MPLBACKEND' in os.environ:
+    # we're already in a kernel
     test()
 elif __name__ == '__main__':
-    import sys
     if sys.argv[1:2] == ['test']:
         test()
     else:
-        from inotify.adapters import Inotify
-        i = Inotify()
-        i.add_watch('.')
-        watched_files = sys.argv[1:]
-        # watched_file = (sys.argv + [None])[1]
-        # import os
-        # common = os.path.commonpath([os.getcwd(), watched_file])
-        # watched_file = watched_file[1+len(common):]
-        # print(common, watched_file)
-        with kernel() as k:
-            for f in watched_files:
-                try:
-                    processed_to_stdout(k.process(open(f, 'r').read()))
-                except FileNotFoundError:
-                    pass
-            for event in i.event_gen(yield_nones=False):
-                (_, event_type, _, filename) = event
-                # print(event_type, filename)
-
-                if event_type == ['IN_CLOSE_WRITE'] and filename in watched_files:
-                    processed_to_stdout(k.process(open(filename, 'r').read()))
-
-                if event_type == ['IN_CLOSE_WRITE'] and filename == '.requests':
-                    try:
-                        request, body = open(filename, 'r').read().split('\n', 1)
-                        handle_request(k, body, *request.split(' '))
-                    except:
-                        print('Invalid request:', str(open(filename, 'r').read()).split('\n')[0])
-                        import traceback
-                        print(traceback.format_exc())
-                        continue
-
+        main()
 
