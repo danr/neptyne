@@ -11,7 +11,7 @@ map global insert <a-w> '<a-;>: write<ret>'
 map global normal <a-h> ': neptyne_inspect normal<ret>'
 
 rmhooks global neptyne
-hook -group neptyne global BufWritePost .*(py|go|rb) %{ try neptyne_process }
+# hook -group neptyne global BufWritePost .*(py|go|rb) %{ try neptyne_process }
 
 
 try %{
@@ -62,15 +62,32 @@ def neptyne_inspect -params 1 %{
     }
 }
 
+def neptyne_request -params 1.. %{
+    echo -to-file .requests "
+type %arg{1}
+bufname %val{bufname}
+buffile %val{buffile}
+cursor_line %val{cursor_line}
+cursor_column %val{cursor_column}
+cursor_byte_offset %val{cursor_byte_offset}
+client %val{client}
+session %val{session}
+timestamp %val{timestamp}
+window_width %val{window_width}
+window_height %val{window_height}
+args %arg{@}
+--- ---
+%val{selection}"
+}
+
 def neptyne_process %{
     eval -draft -no-hooks %{
-        try %{ decl line-specs neptyne_flags }
-        try %{ decl str-list neptyne_prev_flags }
-        try %{ addhl window/ flag-lines default neptyne_flags }
-        try %{ update-option window neptyne-flags }
+        # try %{ decl line-specs neptyne_flags }
+        # try %{ decl str-list neptyne_prev_flags }
+        # try %{ addhl window/ flag-lines default neptyne_flags }
+        # try %{ update-option window neptyne-flags }
         exec \%
-        echo -to-file .requests "process %val{cursor_byte_offset} %val{client} %val{session} %val{timestamp} %opt{neptyne_flags} %opt{neptyne_prev_flags}
-%val{selection}"
+        neptyne_request process
     }
 }
 
