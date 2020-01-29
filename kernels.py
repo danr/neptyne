@@ -14,63 +14,6 @@ async def aseq(*futs):
     for fut in futs:
         await fut
 
-def kernel_executor(k):
-    q = asyncio.Queue()
-
-    # todo: handle messages that are out of order (not obviously connected to a section)
-
-    done = object()
-
-    def handler(msg, where):
-        try:
-            type = msg.header['msg_type']
-            content = msg.content
-            if where == 'iopub' and type == 'execute_result':
-                q.put_nowait(dotdict(type='data', data=content['data'], msg_type=type))
-            elif where == 'iopub' and type == 'display_data':
-                q.put_nowait(dotdict(type='data', data=content['data'], msg_type=type))
-            elif where == 'iopub' and type == 'stream':
-                q.put_nowait(dotdict(type='stream', data={'text/plain': content['text']}, stream=content['name'], msg_type=type))
-            elif type == 'error':
-                q.put_nowait(dotdict(type='error', data={'text/plain': '\n'.join(content['traceback'])}, **content, msg_type=type))
-            elif type in 'execute_input status shutdown_reply'.split():
-                pass
-            else:
-                q.put_nowait(dotdict(type='unknown', data={'text/plain': 'unknown: ' + pformat(dict(type=type, content=content))}, msg_type=type))
-        except Exception as e:
-            q.put_nowait(dotdict(type='internal_error', data={'text/plain': 'error: ' + str(e)}, msg_type=type))
-
-    k.add_handler(handler, 'iopub')
-
-    async def execute(code):
-        asyncio.create_task(aseq(k.execute(code), q.put(done)))
-        while True:
-            item = await q.get()
-            if item is done:
-                break
-            else:
-                yield item
-
-    return execute
-
-async def one(name):
-    async with jkm.run_kernel_async('spec/python3') as k:
-        execute = kernel_executor(k)
-
-        async def logged_execute(code):
-            async for msg in execute(code):
-                print(name + ':', msg, end='')
-
-        await logged_execute('"Hello world!"')
-
-        await asyncio.gather(
-            logged_execute('import asyncio; await asyncio.sleep(1000)'),
-            aseq(asyncio.sleep(0.3), k.interrupt()),
-        )
-
-        await logged_execute('import time\nfor i in range(5): time.sleep(0.3) or print(i)\n5')
-
-        await logged_execute('err')
 
 class dotdict(dict):
     __getattr__ = dict.get
@@ -78,7 +21,7 @@ class dotdict(dict):
     __delattr__ = dict.__delitem__
 
 
-def id_stream(prevs):
+def id_stream(prevs=()):
     id = max([0] + [prev.id or 0 for prev in prevs])
     def bump():
         nonlocal id
@@ -86,6 +29,135 @@ def id_stream(prevs):
         return id
     return bump
 
+
+connections = []
+
+
+async def Document(filename, kernel='spec/python3'):
+    _m, k = await jkm.start_kernel_async('spec/python3')
+
+    inbox = asyncio.Queue()
+
+    def new_body(body):
+        interrupt(body)
+
+    def interrupt(new_body=[]):
+        inbox.put_nowait(dotdict(type='interrupt', new_body=new_body))
+
+    def handler(msg, where):
+        enqueue = lambda **kws: inbox.put_nowait(dotdict(kws))
+        try:
+            type = msg.header['msg_type']
+            content = msg.content
+            if where == 'iopub' and type == 'execute_result':
+                enqueue(type='data', data=content['data'], msg_type=type)
+            elif where == 'iopub' and type == 'display_data':
+                enqueue(type='data', data=content['data'], msg_type=type)
+            elif where == 'iopub' and type == 'stream':
+                enqueue(type='stream', data={'text/plain': content['text']}, stream=content['name'], msg_type=type)
+            elif type == 'error':
+                enqueue(type='error', data={'text/plain': '\n'.join(content['traceback'])}, **content, msg_type=type)
+            elif type in 'execute_input status shutdown_reply'.split():
+                pass
+            else:
+                enqueue(type='unknown', data={'text/plain': 'unknown: ' + pformat(dict(type=type, content=content))}, msg_type=type)
+        except Exception as e:
+            enqueue(type='internal_error', data={'text/plain': 'error: ' + str(e)}, msg_type=type)
+
+    k.add_handler(handler, 'iopub')
+
+    async def process():
+        self = dotdict()
+        self.next_id = id_stream()
+        self.running = False
+        self.interrupting = False
+        self.connections = {}
+
+        self.new_body = None
+        self.done = []
+        self.now = None
+        self.scheduled = []
+
+        def broadcast():
+            all = self.done + ([self.now] if self.now else []) + self.scheduled
+            state = dotdict(done=self.done, now=self.now, scheduled=self.scheduled, all=all)
+            for c in connections: # self.connections.values():
+                asyncio.create_task(c(filename, state))
+
+        while True:
+            msg = await inbox.get()
+            print('type:', msg.type, 'interrupting:', bool(self.interrupting))
+            send_broadcast = False
+            if msg.type == 'interrupt':
+                if not self.running:
+                    self.new_body = msg.new_body
+                else:
+                    if not self.interrupting:
+                        k.interrupt()
+                    self.interrupting = msg
+            elif msg.type == 'execute_done':
+                self.running = False
+                if self.interrupting:
+                    self.new_body = self.interrupting.new_body
+                    self.interrupting = False
+            elif msg.type in {'data', 'execute_result', 'stream', 'error'}:
+                if not self.running:
+                    # detached message
+                    raise NotImplementedError
+                self.now = dotdict(self.now, id=self.next_id(), msgs=[*self.now.msgs, msg])
+                if msg.type == 'error':
+                    cancelled = [
+                        dotdict(s, id=self.next_id(), status='cancelled', msgs=s.msgs or s.prev_msgs, prev_msgs=None)
+                        for s in [self.now, *self.scheduled]
+                    ]
+                    self.done = [*self.done, *cancelled]
+                    self.now = None
+                    self.scheduled = []
+                send_broadcast = True
+
+            if not self.running:
+                if self.new_body:
+                    queue = list(calculate_queue(self.new_body, self.done))
+                    self.new_body = None
+                    done = []
+                    outdated = []
+                    for i, q in enumerate(queue):
+                        q.index = i
+                    for i, q in enumerate(queue):
+                        if q.status == 'done':
+                            done.append(q)
+                        else:
+                            outdated = queue[i:]
+                            break
+                    self.done = done
+                    self.now = None
+                    self.scheduled = outdated
+                    send_broadcast = True
+
+                if self.now:
+                    now = self.now
+                    self.now = None
+                    now = dotdict(now, id=self.next_id(), status='done')
+                    if 'prev_msgs' in now:
+                        del now['prev_msgs']
+                    self.done = [*self.done, now]
+                    send_broadcast = True
+
+                if self.scheduled:
+                    assert self.now is None
+                    self.now, *self.scheduled = self.scheduled
+                    self.now = dotdict(self.now, id=self.next_id(), status='executing', msgs=[])
+                    asyncio.create_task(aseq(
+                        k.execute(self.now.code),
+                        inbox.put(dotdict(type='execute_done'))))
+                    self.running = True
+                    send_broadcast = True
+
+            send_broadcast and broadcast()
+
+    asyncio.create_task(process())
+
+    return dotdict(locals())
 
 def calculate_queue(body, prevs, movements={}):
 
@@ -102,12 +174,17 @@ def calculate_queue(body, prevs, movements={}):
 
     parts = slices(body)
 
-    prevs_by_line = {p.line_end: p for p in prevs}
-    prevs_by_line_range = {
-        prevs_by_line[prev_line].id
-        for _, prev_line in movements.items()
-        if prev_line in prevs_by_line
-    }
+    try:
+        prevs_by_line = {p.line_end: p for p in prevs}
+        prevs_by_line_range = {
+            prevs_by_line[prev_line].id
+            for _, prev_line in movements.items()
+            if prev_line in prevs_by_line
+        }
+    except AttributeError as e:
+        print('AttrError[', e, prevs, ']')
+        prevs_by_line = {}
+        prevs_by_line_range = {}
 
     changed = False
     line_begin = -1
@@ -119,7 +196,8 @@ def calculate_queue(body, prevs, movements={}):
                 code = part,
                 line_begin = line_begin + 1,
                 line_end = line_end,
-                id = next_id()
+                id = next_id(),
+                msgs = [],
             )
             if changed or (not prev or trim(prev.code) != trim(part) or prev.status == 'cancelled'):
                 changed = True
@@ -138,76 +216,17 @@ def calculate_queue(body, prevs, movements={}):
             yield me
             line_begin = line_end
 
-async def runner():
-    # async with jkm.run_kernel_async('spec/python3') as k:
-    _m, k = await jkm.start_kernel_async('spec/python3')
-    execute = kernel_executor(k)
-
-    async def process_queue(queue):
-        # pprint(queue)
-        done = []
-        outdated = []
-        for i, q in enumerate(queue):
-            q.index = i
-        for i, q in enumerate(queue):
-            if q.status == 'done':
-                done.append(q)
-            else:
-                outdated = queue[i:]
-                break
-        next_id = id_stream(queue)
-        def state(done, now=None, scheduled=[]):
-            all = done + ([now] if now else []) + scheduled
-            return dotdict(done=done, now=now, scheduled=scheduled, all=all)
-        errored = False
-        for i, now in enumerate(outdated):
-            scheduled = outdated[i+1:]
-            now = dotdict(now, id=next_id(), status='executing', msgs=[])
-            yield state(done, now, scheduled)
-
-            async for msg in execute(now.code):
-                now = dotdict(now, id=next_id(), msgs=[*now.msgs, msg])
-                yield state(done, now, scheduled)
-                # TODO
-                # if msg.type == 'error' or msg.type == 'cancel':
-                #     errored = True
-
-            if errored:
-                cancelled = [dotdict(s, id=next_id(), status='cancelled', msgs=s.msgs or s.prev_msgs, prev_msgs=None) for s in [now, *scheduled]]
-                yield state([*done, *cancelled])
-                return
-
-            now = dotdict(now, id=next_id(), status='done')
-            if 'prev_msgs' in now:
-                del now['prev_msgs']
-            done = [*done, now]
-
-        yield state(done)
-
-    prevs = []
-    async def rerun(body):
-        nonlocal prevs
-        queue = list(calculate_queue(body, prevs))
-        async for state in process_queue(queue):
-            yield state
-            prevs = state.done
-
-    return rerun
-
-
 async def watch(connections, initial_files=None):
 
-    runners = {}
+    docs = {}
 
     async def do(filename, body):
-        if filename not in runners:
-            runners[filename] = await runner()
-        async for state in runners[filename](body):
-            for c in connections:
-                asyncio.create_task(c(filename, state))
+        if filename not in docs:
+            docs[filename] = await Document(filename)
+        docs[filename].new_body(body)
 
     for filename in initial_files or []:
-        asyncio.create_task(do(filename))
+        asyncio.create_task(do(filename, open(filename, 'r').read()))
 
     watcher = aionotify.Watcher()
     watcher.watch(path='.', flags=aionotify.Flags.CLOSE_WRITE)
@@ -244,6 +263,7 @@ async def stdout_connection(filename, state):
     for d in state.done:
         # print(d.line_begin, '-', d.line_end, ':', d.status)
         for msg in d.msgs or []:
+            # break
             if msg.data and 'text/plain' in msg.data:
                 print(msg.data['text/plain'], end='')
         if d.msgs: print()
@@ -251,6 +271,7 @@ async def stdout_connection(filename, state):
     if state.now:
         # print(state.now.line_begin, '-', state.now.line_end, ':', state.now.status)
         for msg in state.now.msgs:
+            # break
             if msg.data and 'text/plain' in msg.data:
                 print(msg.data['text/plain'], end='')
 
@@ -258,15 +279,13 @@ async def stdout_connection(filename, state):
 
         D, S = map(len, [state.done, state.scheduled])
 
-        print(str(D) + '/' + str(1 + D + S))
+        # print(str(D) + '/' + str(1 + D + S))
     else:
-        print()
+        # print()
         print()
 
 app = web.Application()
 routes = web.RouteTableDef()
-
-connections = []
 
 @routes.get('/ws')
 async def websocket_connection(request):
@@ -289,8 +308,8 @@ async def websocket_connection(request):
             f_id = filename, blob.id
             if f_id not in sent:
                 sent.add(f_id)
-                blobs.append(blob)
-        print('sending blobs', blobs)
+            blobs.append(blob)
+        # print('sending blobs', blobs)
         await websocket.send_json(dict(blobs=blobs, num_cells=len(state.all)))
 
     return websocket
@@ -373,7 +392,7 @@ async def inotify_websocket(request):
     await watcher.setup(loop)
     while True:
         event = await watcher.get_event()
-        print(event)
+        # print(event)
         await websocket.send_str(event.name)
 
     watcher.close()
@@ -384,26 +403,17 @@ app.router.add_routes(routes)
 async def main():
     import sys
     if sys.argv[1:2] == ['test']:
-        await asyncio.gather(
-            one('A'),
-            one('B')
-        )
+        print('oops, no tests')
     else:
-        connections.append(stdout_connection)
+        # connections.append(stdout_connection)
         port = 8234
         runner = web.AppRunner(app, access_log_format='%t %a %s %r')
-        print('a1')
         await runner.setup()
-        print('a2')
         site = web.TCPSite(runner, 'localhost', port)
-        print('a3')
         await site.start()
-        print('a4')
 
         await watch(connections, sys.argv[1:])
 
-        # await runner.cleanup()
-        # print('a5')
-        # web.run_app(app, host='127.0.0.1', port=port)
+        await runner.cleanup()
 
 asyncio.run(main())

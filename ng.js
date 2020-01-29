@@ -166,7 +166,7 @@ function activate(domdiff, root, websocket, state) {
 
   function cell_to_dom(cell) {
     const {status} = cell
-    const msgs = prioritize_images(cell.msgs)
+    let msgs = prioritize_images(cell.msgs)
     const colours = {
       default: 'blue',
       cancelled: 'yellow',
@@ -174,7 +174,6 @@ function activate(domdiff, root, websocket, state) {
       scheduled: 'magenta',
     }
     const border_colour = colours[status] || colours.default
-    let children = msgs.map(msg_to_dom)
     const nothing_yet = cell.status == 'executing' && msgs.filter(m => m.msg_type != 'execute_result').length == 0
       || cell.status == 'scheduled'
     const is_image = msg => 'image/png' in msg.data || 'image/svg+xml' in msg.data
@@ -182,12 +181,12 @@ function activate(domdiff, root, websocket, state) {
     const had_images_previously = prev_msgs.some(is_image)
     console.log({nothing_yet, had_images_previously, prev_msgs, msgs})
     if (had_images_previously && nothing_yet) {
-      children = prev_msgs.map(msg_to_dom)
+      msgs = prev_msgs
     }
-    if (children.length) {
+    if (msgs.length) {
       return pre(
         FlexColumnLeft,
-        ...children,
+        ...msgs.map(msg_to_dom),
         // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(cell, 2, 2)),
         css`
           color:${color_to_css('white')};
