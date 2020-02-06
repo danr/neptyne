@@ -4,32 +4,36 @@
 
 Editor-agnostic jupyter kernel interaction and [kakoune](http://kakoune.org) integration
 
-Work in progress. Enjoy your tinkering around.
+## Installation and usage
 
-## Setup using kakoune
+Have the python kernel installed and run
 
-Clone this repo somewhere and make sure kakoune sources it.
+```
+python install . --user
+```
 
-You will need:
-* jupyter the python lib
-* ipython (or ijulia)
-* inotify
-* xterm
-* optional: jedi
-* optional: libsixel for images
-* optional: imagemagick for svg
+Now run
 
-## Usage from kakoune
+```
+neptyne FILES...
+```
 
-Run the command `neptyne`, it will spawn an xterm for you.
+In the directory you want some files to be viewed. Now open your browser and start editing and saving the files:
 
-The file `neptyne.kak` defines a few keybindings, most of them in insert mode.
+```
+cromium --app=http://localhost:8234
+```
 
-Note that the virtualenv you start kakoune in will be inherited from the xterm that is spawned.
+## Usage with kakoune
 
-## Usage without kakoune
+Inside kakoune run
 
-Run `python /path/to/neptyne/neptyne.py your_file.py`.
+```
+source %sh{neptyne kak_source}
+```
+
+Now you can use eg `neptyne-enable-process-on-idle` to rerun the kernel on NormalIdle and InsertIdle.
+No files need to be listed on the command line, communication goes via a file called `.requests`.
 
 ## License
 

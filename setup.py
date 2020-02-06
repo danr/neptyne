@@ -9,18 +9,20 @@ except IOError:
 setup(
     name="neptyne",
     version="0.1.0",
-    description="Jupyter support for the kakoune editor",
+    description="Lightweight jupyter sidekick",
     license="MIT",
     author="Dan Rosén",
-    packages=find_packages(),
     entry_points={
         'console_scripts': [
-            'neptyne = neptyne:main',
-            'wss = wss:main',
+            'neptyne = neptyne:sync_main',
         ]
     },
-    py_modules=["neptyne", "wss"],
-    install_requires=[],
+    py_modules=["neptyne"],
+    packages=['.'],
+    package_data={
+        '.': ["*.js", "*.kak"],
+    },
+    install_requires=[ r for r in open("requirements.txt").read().split('\n') if not r.startswith('#') ],
     long_description=long_description,
     classifiers=[
         "Programming Language :: Python",

@@ -1,3 +1,3 @@
-tqdm
-jupyter-client
-inotify
+jupyter-kernel-mgmt
+aionotify
+aiohttp

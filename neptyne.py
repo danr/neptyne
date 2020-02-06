@@ -10,10 +10,11 @@ from aiohttp import web
 import re
 from itertools import zip_longest
 
+import os
+
 async def aseq(*futs):
     for fut in futs:
         await fut
-
 
 class dotdict(dict):
     __getattr__ = dict.get
@@ -32,9 +33,12 @@ def id_stream(prevs=()):
 
 connections = []
 
+kernels = []
 
 async def Document(filename, kernel='spec/python3'):
     _m, k = await jkm.start_kernel_async('spec/python3')
+
+    kernels.append(k)
 
     inbox = asyncio.Queue()
 
@@ -86,13 +90,14 @@ async def Document(filename, kernel='spec/python3'):
 
         while True:
             msg = await inbox.get()
-            print('type:', msg.type, 'interrupting:', bool(self.interrupting))
+            print('interrupting:', int(bool(self.interrupting)), 'type:', msg.type)
             send_broadcast = False
             if msg.type == 'interrupt':
                 if not self.running:
                     self.new_body = msg.new_body
                 else:
                     if not self.interrupting:
+                        # asyncio.create_task(k.interrupt())
                         k.interrupt()
                     self.interrupting = msg
             elif msg.type == 'execute_done':
@@ -375,8 +380,13 @@ def _track(request):
 def root(request):
     return track('index.js')
 
+
+static_dir = os.environ.get('NEPTYNE_DEV_DIR', os.path.dirname(__file__))
+
+print(f'Using {static_dir=}')
+
 app.add_routes([
-    web.static('/static/', '.', show_index=True, append_version=True),
+    web.static('/static/', static_dir, show_index=True, append_version=True),
 ])
 
 @routes.get('/inotify')
@@ -404,6 +414,8 @@ async def main():
     import sys
     if sys.argv[1:2] == ['test']:
         print('oops, no tests')
+    elif sys.argv[1:2] == ['kak_source']:
+        print(open(os.path.join(static_dir, 'neptyne.kak'), 'r').read())
     else:
         # connections.append(stdout_connection)
         port = 8234
@@ -416,4 +428,13 @@ async def main():
 
         await runner.cleanup()
 
-asyncio.run(main())
+def sync_main():
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        for k in kernels:
+            k.close()
+
+if __name__ == '__main__':
+    sync_main()
+
