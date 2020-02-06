@@ -383,8 +383,6 @@ def root(request):
 
 static_dir = os.environ.get('NEPTYNE_DEV_DIR', os.path.dirname(__file__))
 
-print(f'Using {static_dir=}')
-
 app.add_routes([
     web.static('/static/', static_dir, show_index=True, append_version=True),
 ])
@@ -419,12 +417,26 @@ async def main():
     else:
         # connections.append(stdout_connection)
         port = 8234
+        host = '127.0.0.1'
+        args = list(sys.argv[1:])
+        while len(args) >= 2 and args[0].startswith('-'):
+            if args[0].startswith('-p'):
+                port = int(args[1])
+                args = args[2:]
+            elif args[0].startswith('-b'):
+                host = args[1]
+                args = args[2:]
+            elif args[0].startswith('-h'):
+                print('neptyne [-p PORT] [-b BIND_ADDR] [FILES...]')
+                sys.exit(0)
+            else:
+                raise 'Unknown flag: ' + args[0]
         runner = web.AppRunner(app, access_log_format='%t %a %s %r')
         await runner.setup()
-        site = web.TCPSite(runner, 'localhost', port)
+        site = web.TCPSite(runner, host, port)
         await site.start()
 
-        await watch(connections, sys.argv[1:])
+        await watch(connections, args)
 
         await runner.cleanup()
 

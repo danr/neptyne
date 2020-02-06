@@ -35,6 +35,12 @@ source %sh{neptyne kak_source}
 Now you can use eg `neptyne-enable-process-on-idle` to rerun the kernel on NormalIdle and InsertIdle.
 No files need to be listed on the command line, communication goes via a file called `.requests`.
 
+## Installation with docker
+
+```
+docker run -p 8234:8234 -v "$PWD:/workdir" -it $(docker build -q .) neptyne -b 0.0.0.0 FILES...
+```
+
 ## License
 
 MIT
