@@ -21,7 +21,7 @@ neptyne FILES...
 In the directory you want some files to be viewed. Now open your browser and start editing and saving the files:
 
 ```
-cromium --app=http://localhost:8234
+chromium --app=http://localhost:8234
 ```
 
 ## Usage with kakoune
