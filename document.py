@@ -105,8 +105,8 @@ async def _Document(filename, connections, kernel, ID):
     inbox = asyncio.Queue()
 
     async def close():
-        self.closed = True
-        _documents.remove(self)
+        this.closed = True
+        _documents.remove(this)
         inbox.put_nowait(dotdict(type='shutdown'))
         await k.shutdown()
         k.close()
@@ -115,7 +115,7 @@ async def _Document(filename, connections, kernel, ID):
     prio = 0
 
     def new_body(body):
-        self.last_body = body
+        this.last_body = body
         nonlocal prio
         prio += 1
         inbox.put_nowait(dotdict(type='interrupt', new_body=body, prio=prio))
@@ -264,12 +264,12 @@ async def _Document(filename, connections, kernel, ID):
 
     asyncio.create_task(process())
 
-    self = dotdict(locals())
-    self.closed = False
+    this = dotdict(locals())
+    this.closed = False
 
-    _documents.append(self)
+    _documents.append(this)
 
-    return self
+    return this
 
 async def stdout_connection(filename, state, seen=set()):
     for d in state.all:
