@@ -69,7 +69,35 @@ def diff_new_body(new_body, prevs):
 
 IDs = 0
 
-async def Document(filename, connections, kernel='spec/python3'):
+async def Document(filename, connections, kernel=None):
+
+    if kernel is None:
+        exts = dict(
+            py='python',
+            r='R',
+            lua='lua',
+            jl='julia',
+        )
+
+        langname = None
+        for ext, lang in exts.items():
+            if filename.lower().endswith(ext):
+                langname = lang
+                break
+
+        if not langname:
+            raise RuntimeError('Unknown kernel language for filename '  + filename)
+
+        KF = jkm.discovery.KernelFinder.from_entrypoints()
+
+        kernel = None
+        for name, info in KF.find_kernels():
+            if info['language_info']['name'] == langname:
+                kernel = name
+                break
+
+        if not kernel:
+            raise RuntimeError('No kernel for language ' + langname)
 
     global IDs
     ID = IDs

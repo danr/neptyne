@@ -77,10 +77,9 @@ function activate(domdiff, root, websocket, state) {
       margin: 0;
     }
     pre, body {
-      font-size: 22px;
-      // font-family: 'Source Serif Pro';
+      font-size: 18px;
+      letter-spacing: -1px;
       font-family: 'Consolas';
-      letter-spacing: -0.04em;
       font-weight: 400 !important;
       background: linear-gradient(to bottom right, ${color_to_css('bright-green')} 20%, ${color_to_css('black')});
     }
