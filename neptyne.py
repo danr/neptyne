@@ -26,7 +26,7 @@ async def watch(connections, initial_files=None):
         docs[filename].new_body(body)
 
     for filename in initial_files or []:
-        asyncio.create_task(do(filename, open(filename, 'r').read()))
+        await do(filename, open(filename, 'r').read())
 
     watcher = aionotify.Watcher()
     watcher.watch(path='.', flags=aionotify.Flags.CLOSE_WRITE)
@@ -38,7 +38,7 @@ async def watch(connections, initial_files=None):
         filename = event.name
         if filename in (initial_files or []):
             body = open(filename, 'r').read()
-            asyncio.create_task(do(filename, body))
+            await do(filename, body)
         if filename == '.requests':
             contents = open('.requests', 'r').read()
             params = dotdict()
@@ -53,7 +53,7 @@ async def watch(connections, initial_files=None):
                 params[k] = v
             # print(pformat(params))
             if params.type == 'process':
-                asyncio.create_task(do(params.bufname, body))
+                await do(params.bufname, body)
             else:
                 print('Unknown request:', pformat(params))
 
@@ -68,7 +68,7 @@ async def websocket_connection(request):
     q = asyncio.Queue()
 
     async def fwd(filename, state):
-        q.put_nowait((filename, state))
+        await q.put((filename, state))
 
     connections.append(fwd)
 

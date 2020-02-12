@@ -69,37 +69,75 @@ def diff_new_body(new_body, prevs):
 IDs = 0
 
 async def Document(filename, connections, kernel='spec/python3'):
+
     global IDs
     ID = IDs
     IDs += 1
-    m, k = await jkm.start_kernel_async('spec/python3')
+
+    active = await _Document(filename, connections, kernel, ID)
+
+    self = dotdict()
+
+    for f in active.keys():
+        self[f] = (lambda f=f: lambda *args, **kws: active[f](*args, **kws))()
+
+    async def watcher():
+        nonlocal active
+        while True:
+            await asyncio.sleep(0.1)
+            y = await active.k.is_alive()
+            if active.closed:
+                return
+            if not y:
+                print(ID, 'Kernel has died, restarting')
+                last_body = active.last_body
+                active = await _Document(filename, connections, kernel, ID)
+                active.new_body(last_body)
+
+    asyncio.create_task(watcher())
+
+    return self
+
+
+async def _Document(filename, connections, kernel, ID):
+    m, k = await jkm.start_kernel_async(kernel)
+
+    async def watcher():
+        print(ID, 'Watching...')
+        while True:
+            await asyncio.sleep(0.1)
+            y = await k.is_alive()
+            if not y:
+                print(ID, 'Kernel has died.')
+                return
+    # asyncio.create_task(watcher())
 
     inbox = asyncio.Queue()
 
-    execute_input = asyncio.Queue()
+    # execute_input = asyncio.Queue()
 
     async def close():
+        self.closed = True
         _documents.remove(self)
         inbox.put_nowait(dotdict(type='shutdown'))
         await k.shutdown()
         k.close()
         await m.wait()
 
-    def new_body(body):
-        interrupt(body)
-
     prio = 0
 
-    def interrupt(new_body=[]):
+    def new_body(body):
+        self.last_body = body
         nonlocal prio
         prio += 1
-        inbox.put_nowait(dotdict(type='interrupt', new_body=new_body, prio=prio))
+        inbox.put_nowait(dotdict(type='interrupt', new_body=body, prio=prio))
 
     def handler(msg, where):
         enqueue = lambda **kws: inbox.put_nowait(dotdict(kws))
         try:
             type = msg.header['msg_type']
             content = msg.content
+            # print(type, msg.content['execution_state'] if type == 'status' else '')
             if where == 'iopub' and type == 'execute_result':
                 enqueue(type='data', data=content['data'], msg_type=type)
             elif where == 'iopub' and type == 'display_data':
@@ -111,8 +149,8 @@ async def Document(filename, connections, kernel='spec/python3'):
             elif type == 'status':
                 enqueue(type='status', state=msg.content['execution_state'])
             elif type == 'execute_input':
-                execute_input.put_nowait(msg.content['code'])
-                # pass
+                # execute_input.put_nowait(msg.content['code'])
+                pass
             elif type in 'shutdown_reply'.split():
                 # print(time.monotonic(), ID, 'Unhandled:', msg, msg.content)
                 pass
@@ -138,6 +176,8 @@ async def Document(filename, connections, kernel='spec/python3'):
         self.last_interrupt = time.monotonic() - 1
         self.body_prio = -1
 
+        self.busy = False
+
         async def broadcast():
             all = self.done + ([self.now] if self.now else []) + self.scheduled
             state = dotdict(self, all=all) # done=self.done, now=self.now, scheduled=self.scheduled, all=all)
@@ -152,8 +192,11 @@ async def Document(filename, connections, kernel='spec/python3'):
             # print(ID, time.monotonic(), msg.type, self.max_interrupt, msg.prio, self.body_prio, self.finished)
             if not await k.is_alive():
                 pprint(('not alive:', ID, msg, self), compact=True)
+                return
             if msg.type == 'shutdown':
                 return
+            elif msg.type == 'status':
+                self.busy = msg.state == 'busy'
             elif msg.type == 'interrupt':
                 if not self.interrupting or msg.prio >= self.interrupting.prio:
                     if not self.running and msg.prio > self.body_prio:
@@ -162,14 +205,15 @@ async def Document(filename, connections, kernel='spec/python3'):
                     elif self.running and msg.prio > self.body_prio:
                         self.interrupting = msg
                         # reschedule this in case kernel is not ready to be interrupted
-                        RETRY = 0.3
-                        asyncio.create_task(aseq(
-                            asyncio.sleep(RETRY),
-                            inbox.put(dotdict(msg, rerun=True))))
-                        if time.monotonic() - self.last_interrupt > RETRY:
-                            self.last_interrupt = time.monotonic()
+                        if self.busy:
+                            self.busy = False
                             await k.interrupt()
                             # print(ID, time.monotonic(), 'interrupt sent', msg.prio)
+                        else:
+                            asyncio.create_task(aseq(
+                                asyncio.sleep(0.5),
+                                inbox.put(dotdict(msg, rerun=True))))
+                            # print(ID, time.monotonic(), 'too early to interrupt', msg.prio)
             elif msg.type == 'execute_done':
                 self.finished = self.now.id if self.now else self.finished
                 self.running = False
@@ -222,12 +266,13 @@ async def Document(filename, connections, kernel='spec/python3'):
                     assert self.now is None
                     self.now, *self.scheduled = self.scheduled
                     self.now = dotdict(self.now, status='executing', msgs=[])
-                    # print(ID, 'executing', self.now.code)
+                    # print(ID, 'executing', repr(self.now.code), self.body_prio)
                     asyncio.create_task(aseq(
                         k.execute(self.now.code, store_history=False),
                         inbox.put(dotdict(type='execute_done', state=dotdict(self)))))
-                    code = await execute_input.get()
-                    assert code == self.now.code, 'Out of sync'
+                    # code = await execute_input.get()
+                    # print(ID, 'executing started', repr(self.now.code), self.body_prio)
+                    # assert code == self.now.code, 'Out of sync'
                     self.running = True
                     send_broadcast = True
 
@@ -236,6 +281,7 @@ async def Document(filename, connections, kernel='spec/python3'):
     asyncio.create_task(process())
 
     self = dotdict(locals())
+    self.closed = False
 
     _documents.append(self)
 
@@ -404,11 +450,12 @@ async def test():
         await test_a_interrupt_c()
     await test_prios()
 
-    #
-    # await asyncio.gather(
-    #     *(aseq(asyncio.sleep(i*0.6), test_interrupt()) for i in range(2)),
-    #     *(aseq(asyncio.sleep(i*0.6+0.3), test_a_interrupt_c()) for i in range(2)),
-    # )
+    return
+
+    await asyncio.gather(
+        *(aseq(asyncio.sleep(i*0.6), test_interrupt()) for i in range(2)),
+        *(aseq(asyncio.sleep(i*0.6+0.3), test_a_interrupt_c()) for i in range(2)),
+    )
 
     #async def crash():
     #    m, k = await jkm.start_kernel_async('spec/python3')
