@@ -1,9 +1,15 @@
+const isElement = x => x instanceof Element
+
 export function Tag(name, children) {
   const next_attrs = {}
   children = children.filter(function filter_child(child) {
     if (!child) return false
     const type = typeof child
-    if (type == 'object' && !Array.isArray(child)) {
+    if (isElement(child)) {
+      if (!child.foreign) {
+        throw new Error(`Element child to ${name} needs to have foreign flag set`)
+      }
+    } else if (type == 'object' && !Array.isArray(child)) {
       for (const k in child) {
         if (!(k in next_attrs)) {
           next_attrs[k] = []
@@ -70,7 +76,9 @@ export function Tag(name, children) {
       if (i < elem.childNodes.length) {
         const prev = elem.childNodes[i]
         let next = child
-        if (typeof child == 'function') {
+        if (isElement(child)) {
+          // pass
+        } else if (typeof child == 'function') {
           next = child(prev, ns)
         } else if (typeof child == 'string') {
           if (prev instanceof Text && prev.textContent == child) {
@@ -103,6 +111,7 @@ export function forward(f, g) {
 
 export const MakeTag = name => (...children) => Tag(name, children)
 export const div = MakeTag('div')
+export const img = MakeTag('img')
 export const pre = MakeTag('pre')
 export const span = MakeTag('span')
 export const h1 = MakeTag('h1')
