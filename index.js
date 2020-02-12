@@ -115,6 +115,8 @@ function activate(domdiff, root, websocket, state) {
       node
     ]
 
+    console.log(state.cells)
+
     const morph = div(
       id`root`,
       css`
@@ -136,13 +138,7 @@ function activate(domdiff, root, websocket, state) {
   state.cells = state.cells || []
 
   function update_cell_data(msg) {
-    const {blobs, num_cells} = msg
-    // console.log(msg)
-    state.cells.splice(num_cells)
-    for (const blob of blobs) {
-      // console.log(blob)
-      state.cells[blob.index] = blob
-    }
+    state.cells = msg
     // console.log(state.cells)
   }
 
@@ -174,13 +170,13 @@ function activate(domdiff, root, websocket, state) {
       scheduled: 'magenta',
     }
     const border_colour = colours[status] || colours.default
-    const nothing_yet = cell.status == 'executing' && msgs.filter(m => m.msg_type != 'execute_result').length == 0
+    const nothing_yet = cell.status == 'executing' // && msgs.filter(m => m.msg_type != 'execute_result').length == 0
       || cell.status == 'scheduled'
     const is_image = msg => 'image/png' in msg.data || 'image/svg+xml' in msg.data
     const prev_msgs = prioritize_images(cell.prev_msgs)
-    const had_images_previously = prev_msgs.some(is_image)
-    console.log({nothing_yet, had_images_previously, prev_msgs, msgs})
-    if (had_images_previously && nothing_yet) {
+    const prev_some_img = prev_msgs.some(is_image)
+    // console.log({nothing_yet, prev_some_img, prev_msgs, msgs})
+    if (prev_some_img && nothing_yet) {
       msgs = prev_msgs
     }
     if (msgs.length) {
