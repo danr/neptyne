@@ -102,19 +102,7 @@ async def Document(filename, connections, kernel='spec/python3'):
 async def _Document(filename, connections, kernel, ID):
     m, k = await jkm.start_kernel_async(kernel)
 
-    async def watcher():
-        print(ID, 'Watching...')
-        while True:
-            await asyncio.sleep(0.1)
-            y = await k.is_alive()
-            if not y:
-                print(ID, 'Kernel has died.')
-                return
-    # asyncio.create_task(watcher())
-
     inbox = asyncio.Queue()
-
-    # execute_input = asyncio.Queue()
 
     async def close():
         self.closed = True
@@ -149,7 +137,6 @@ async def _Document(filename, connections, kernel, ID):
             elif type == 'status':
                 enqueue(type='status', state=msg.content['execution_state'])
             elif type == 'execute_input':
-                # execute_input.put_nowait(msg.content['code'])
                 pass
             elif type in 'shutdown_reply'.split():
                 # print(time.monotonic(), ID, 'Unhandled:', msg, msg.content)
@@ -270,9 +257,6 @@ async def _Document(filename, connections, kernel, ID):
                     asyncio.create_task(aseq(
                         k.execute(self.now.code, store_history=False),
                         inbox.put(dotdict(type='execute_done', state=dotdict(self)))))
-                    # code = await execute_input.get()
-                    # print(ID, 'executing started', repr(self.now.code), self.body_prio)
-                    # assert code == self.now.code, 'Out of sync'
                     self.running = True
                     send_broadcast = True
 
