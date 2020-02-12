@@ -8,8 +8,6 @@ from itertools import zip_longest
 
 from utils import *
 
-import time
-
 _documents = []
 
 async def close_documents():
@@ -139,12 +137,12 @@ async def _Document(filename, connections, kernel, ID):
             elif type == 'execute_input':
                 pass
             elif type in 'shutdown_reply'.split():
-                # print(time.monotonic(), ID, 'Unhandled:', msg, msg.content)
+                # print(ID, 'Unhandled:', msg, msg.content)
                 pass
             else:
                 raise ValueError('Unknown type:' + type)
         except Exception as e:
-            print(time.monotonic(), ID, '*** INTERNAL ERROR in iopub handler ***')
+            print(ID, '*** INTERNAL ERROR in iopub handler ***')
             import traceback as tb
             tb.print_ID, exc()
 
@@ -160,7 +158,6 @@ async def _Document(filename, connections, kernel, ID):
         self.now = None
         self.scheduled = []
 
-        self.last_interrupt = time.monotonic() - 1
         self.body_prio = -1
 
         self.busy = False
@@ -176,7 +173,7 @@ async def _Document(filename, connections, kernel, ID):
             send_bropdcast = False
             cancel_queue = False
             # pprint((ID, msg, self), compact=True)
-            # print(ID, time.monotonic(), msg.type, self.max_interrupt, msg.prio, self.body_prio, self.finished)
+            # print(ID, msg.type, self.max_interrupt, msg.prio, self.body_prio, self.finished)
             if not await k.is_alive():
                 pprint(('not alive:', ID, msg, self), compact=True)
                 return
@@ -195,12 +192,12 @@ async def _Document(filename, connections, kernel, ID):
                         if self.busy:
                             self.busy = False
                             await k.interrupt()
-                            # print(ID, time.monotonic(), 'interrupt sent', msg.prio)
+                            # print(ID, 'interrupt sent', msg.prio)
                         else:
                             asyncio.create_task(aseq(
                                 asyncio.sleep(0.5),
                                 inbox.put(dotdict(msg, rerun=True))))
-                            # print(ID, time.monotonic(), 'too early to interrupt', msg.prio)
+                            # print(ID, 'too early to interrupt', msg.prio)
             elif msg.type == 'execute_done':
                 self.finished = self.now.id if self.now else self.finished
                 self.running = False
@@ -213,7 +210,7 @@ async def _Document(filename, connections, kernel, ID):
                 # if msg.type == 'error':
                 #     print(msg.ename)
                 #     print(msg.data['text/plain'])
-                # if msg.type == 'stream': print(time.monotonic(), ID, msg)
+                # if msg.type == 'stream': print(ID, msg)
                 if not self.running:
                     print('detached message:', msg)
                 interrupted = msg.type == 'error' and msg.ename == 'KeyboardInterrupt'
