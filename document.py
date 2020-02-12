@@ -62,6 +62,8 @@ def diff_new_body(new_body, prevs):
                     me.prev_msgs = prev.prev_msgs
             out[me.status].append(me)
 
+    # pprint(dotdict(out, new_body=new_body))
+
     return out
 
 IDs = 0
@@ -136,18 +138,18 @@ async def Document(filename, connections, kernel='spec/python3'):
         self.last_interrupt = time.monotonic() - 1
         self.body_prio = -1
 
-        def broadcast():
+        async def broadcast():
             all = self.done + ([self.now] if self.now else []) + self.scheduled
             state = dotdict(self, all=all) # done=self.done, now=self.now, scheduled=self.scheduled, all=all)
             for c in connections:
-                asyncio.create_task(c(filename, state))
+                await c(filename, state)
 
         while True:
             msg = await inbox.get()
             send_bropdcast = False
             cancel_queue = False
             # pprint((ID, msg, self), compact=True)
-            # print(ID, time.monotonic(), msg.type, self.max_interrupt, msg.prio)
+            # print(ID, time.monotonic(), msg.type, self.max_interrupt, msg.prio, self.body_prio, self.finished)
             if not await k.is_alive():
                 pprint(('not alive:', ID, msg, self), compact=True)
             if msg.type == 'shutdown':
@@ -157,7 +159,7 @@ async def Document(filename, connections, kernel='spec/python3'):
                     if not self.running and msg.prio > self.body_prio:
                         self.body_prio = msg.prio
                         self.new_body = msg.new_body
-                    elif self.running:
+                    elif self.running and msg.prio > self.body_prio:
                         self.interrupting = msg
                         # reschedule this in case kernel is not ready to be interrupted
                         RETRY = 0.3
@@ -169,6 +171,7 @@ async def Document(filename, connections, kernel='spec/python3'):
                             await k.interrupt()
                             # print(ID, time.monotonic(), 'interrupt sent', msg.prio)
             elif msg.type == 'execute_done':
+                self.finished = self.now.id if self.now else self.finished
                 self.running = False
                 if self.interrupting and self.interrupting.prio > self.body_prio:
                     self.body_prio = self.interrupting.prio
@@ -176,10 +179,12 @@ async def Document(filename, connections, kernel='spec/python3'):
                     self.interrupting = False
                     cancel_queue = True
             elif msg.type in {'data', 'execute_result', 'stream', 'error'}:
+                # if msg.type == 'error':
+                #     print(msg.ename)
+                #     print(msg.data['text/plain'])
                 # if msg.type == 'stream': print(time.monotonic(), ID, msg)
                 if not self.running:
-                    # detached message
-                    raise NotImplementedError
+                    print('detached message:', msg)
                 interrupted = msg.type == 'error' and msg.ename == 'KeyboardInterrupt'
                 msg.id = next_id()
                 if not interrupted:
@@ -226,8 +231,7 @@ async def Document(filename, connections, kernel='spec/python3'):
                     self.running = True
                     send_broadcast = True
 
-            send_broadcast and broadcast()
-            self.prev = msg
+            send_broadcast and await broadcast()
 
     asyncio.create_task(process())
 
@@ -250,15 +254,15 @@ async def stdout_connection(filename, state, seen=set()):
 
 def output(state):
     # pprint(state)
-    return [m.data['text/plain'].strip() for cell in state.all for m in cell.msgs]
+    return [m.data['text/plain'].strip() for cell in state.all for m in cell.msgs if cell.status != 'cancelled']
 
 def prev_output(state):
     # pprint(state)
     return [m.data['text/plain'].strip() for cell in state.all for m in cell.prev_msgs or []]
 
 
-def assert_eq(a, b):
-    assert a == b, str(a) + ' != ' + str(b)
+def assert_eq(a, b, obj=None):
+    assert a == b, str(a) + ' != ' + str(b) + ('' if obj is None else ' ' + pformat(obj))
     print(str(a) + ' == ' + str(b))
 
 
@@ -266,11 +270,27 @@ async def test_kernel():
     q = asyncio.Queue()
     async def c(filename, state):
         if state.running == False:
-            q.put_nowait(state)
+            await q.put(state)
 
     cs = [c]
     d = await Document('test.py', cs)
     return q, d
+
+
+async def test_kernel_with_all_finished():
+    q = asyncio.Queue()
+    last = None
+    async def c(filename, state):
+        nonlocal last
+        if state.finished != last:
+            last = state.finished
+            await q.put(state)
+
+    cs = [c]
+    d = await Document('test.py', cs)
+    return q, d
+
+
 
 
 async def test_abc():
@@ -350,6 +370,30 @@ async def test_a_interrupt_c():
 
     await d.close()
 
+async def test_prios():
+    q, d = await test_kernel_with_all_finished()
+
+    d.new_body('1')
+    assert_eq(['1'], output(await q.get()))
+
+    for X in range(5, 15):
+        d.new_body('\n\n'.join(f"print(len(list(range(1000000))) and {i}, end='')" for i in range(X)))
+        out = []
+        for i in range(3):
+            # print(f'slow {i}')
+            out.append(str(i))
+            s = await(q.get())
+            assert_eq(out, output(s), s)
+
+        d.new_body('\n\n'.join(f"print(len(list(range(100000))) and {i}, end='')" for i in range(X)))
+        out = []
+        for i in range(X + 1):
+            # print(f'quick {i}')
+            s = await(q.get())
+            assert_eq(out, output(s), s)
+            out.append(str(i))
+
+    await d.close()
 
 async def test():
     await test_abc()
@@ -358,6 +402,7 @@ async def test():
         await test_interrupt()
     for i in range(5):
         await test_a_interrupt_c()
+    await test_prios()
 
     #
     # await asyncio.gather(
