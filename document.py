@@ -52,7 +52,10 @@ def diff_new_body(new_body, prevs):
                 changed = True
                 me.status = 'scheduled'
                 if prev:
-                    me.prev_msgs = prev.msgs or prev.prev_msgs or []
+                    if prev.status == 'done':
+                        me.prev_msgs = prev.msgs or []
+                    else:
+                        me.prev_msgs = prev.msgs or prev.prev_msgs or []
             else:
                 me.status = 'done'
                 if prev:
@@ -212,11 +215,14 @@ async def _Document(filename, connections, kernel, ID):
                 #     print(msg.data['text/plain'])
                 # if msg.type == 'stream': print(ID, msg)
                 if not self.running:
-                    print('detached message:', msg)
+                    print('detached message:', msg, self)
                 interrupted = msg.type == 'error' and msg.ename == 'KeyboardInterrupt'
                 msg.id = next_id()
                 if not interrupted:
-                    self.now = dotdict(self.now, msgs=[*self.now.msgs, msg])
+                    if not self.now:
+                        print('detached message:', msg, self)
+                    else:
+                        self.now = dotdict(self.now, msgs=[*self.now.msgs, msg])
                 if msg.type == 'error':
                     cancel_queue = True
 

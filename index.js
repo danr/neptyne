@@ -145,6 +145,7 @@ function activate(domdiff, root, websocket, state) {
   // console.log(state.cells)
 
   websocket.onmessage = function on_message(msg) {
+    // console.log({msg})
     update_cell_data(JSON.parse(msg.data))
     schedule_refresh()
   }
@@ -167,16 +168,17 @@ function activate(domdiff, root, websocket, state) {
       default: 'blue',
       cancelled: 'yellow',
       executing: 'green',
-      scheduled: 'magenta',
+      scheduled: 'bright-yellow',
     }
     const border_colour = colours[status] || colours.default
-    const nothing_yet = cell.status == 'executing' // && msgs.filter(m => m.msg_type != 'execute_result').length == 0
+    const nothing_yet = cell.status == 'executing' && msgs.filter(m => m.msg_type != 'execute_result').length == 0
       || cell.status == 'scheduled'
     const is_image = msg => 'image/png' in msg.data || 'image/svg+xml' in msg.data
     const prev_msgs = prioritize_images(cell.prev_msgs)
     const prev_some_img = prev_msgs.some(is_image)
     // console.log({nothing_yet, prev_some_img, prev_msgs, msgs})
-    if (prev_some_img && nothing_yet) {
+    // console.log({nothing_yet, prev_msgs, msgs})
+    if (prev_msgs.length > 0 && nothing_yet) {
       msgs = prev_msgs
     }
     if (msgs.length) {
@@ -239,7 +241,6 @@ function activate(domdiff, root, websocket, state) {
       }
     }
   }
-
 }
 
 async function main() {
@@ -259,3 +260,4 @@ async function main() {
 }
 
 main()
+
