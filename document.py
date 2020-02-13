@@ -201,7 +201,7 @@ async def _Document(filename, connections, kernel, ID):
 
         while True:
             msg = await inbox.get()
-            send_bropdcast = False
+            send_broadcast = False
             cancel_queue = False
             # pprint((ID, msg, self), compact=True)
             # print(ID, msg.type, self.max_interrupt, msg.prio, self.body_prio, self.finished)
