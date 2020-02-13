@@ -159,7 +159,7 @@ async def inotify_websocket(request):
     await websocket.prepare(request)
 
     watcher = aionotify.Watcher()
-    watcher.watch(path='.', flags=aionotify.Flags.CLOSE_WRITE)
+    watcher.watch(path=static_dir, flags=aionotify.Flags.CLOSE_WRITE)
 
     loop = asyncio.get_event_loop()
     await watcher.setup(loop)
