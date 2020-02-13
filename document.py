@@ -187,6 +187,9 @@ async def _Document(filename, connections, kernel, ID):
 
     k.add_handler(handler, 'iopub')
 
+    def broadcast():
+        inbox.put_nowait(dotdict(type='broadcast'))
+
     async def process():
         self = dotdict()
         self.running = False
@@ -218,6 +221,8 @@ async def _Document(filename, connections, kernel, ID):
                 return
             if msg.type == 'shutdown':
                 return
+            elif msg.type == 'broadcast':
+                send_broadcast = True
             elif msg.type == 'status':
                 self.busy = msg.state == 'busy'
             elif msg.type == 'interrupt':

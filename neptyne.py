@@ -16,9 +16,11 @@ from document import Document
 
 connections = []
 
+docs = {}
+
 async def watch(connections, initial_files=None):
 
-    docs = {}
+    assert not docs, 'Watch already started'
 
     async def do(filename, body):
         if filename not in docs:
@@ -71,6 +73,9 @@ async def websocket_connection(request):
         await q.put((filename, state))
 
     connections.append(fwd)
+    for _, d in docs.items():
+        d.broadcast()
+
 
     sent = set()
 
