@@ -90,6 +90,9 @@ function activate(domdiff, root, websocket, state) {
     span {
       white-space: pre;
     }
+    table {
+      color: inherit;
+    }
   `
 
   let rAF = k => window.requestAnimationFrame(k)
@@ -214,8 +217,8 @@ function activate(domdiff, root, websocket, state) {
       const plain = mimes['text/plain']
       if (html || svg) {
         const div = document.createElement('div')
-        div.style.background = 'white'
-        div.style.display = 'inline-block'
+        // div.style.background = 'white'
+        // div.style.display = 'inline-block'
         div.foreign = true
         div.innerHTML = html || svg
         return div
