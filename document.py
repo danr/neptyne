@@ -67,37 +67,45 @@ def diff_new_body(new_body, prevs):
 
     return out
 
+def kernel_from_filename(filename):
+    exts = dict(
+        py='python',
+        r='R',
+        lua='lua',
+        jl='julia',
+        go='go',
+        rb='ruby',
+    )
+
+    KF = jkm.discovery.KernelFinder.from_entrypoints()
+    found_kernels = list(KF.find_kernels())
+
+    known_str = (
+        '\n\nKnown kernels:\n' + pformat(found_kernels) +
+        '\n\nKnown extensions: ' + pformat(exts)
+    )
+
+    langname = None
+    for ext, lang in exts.items():
+        if filename.lower().endswith(ext):
+            langname = lang
+            break
+
+    if not langname:
+        raise RuntimeError('Unknown kernel language for filename ' + filename + known_str)
+
+    for name, info in found_kernels:
+        if info['language_info']['name'] == langname:
+            return name
+
+    raise RuntimeError('No kernel for language ' + langname + known_str)
+
 IDs = 0
 
 async def Document(filename, connections, kernel=None):
 
     if kernel is None:
-        exts = dict(
-            py='python',
-            r='R',
-            lua='lua',
-            jl='julia',
-        )
-
-        langname = None
-        for ext, lang in exts.items():
-            if filename.lower().endswith(ext):
-                langname = lang
-                break
-
-        if not langname:
-            raise RuntimeError('Unknown kernel language for filename '  + filename)
-
-        KF = jkm.discovery.KernelFinder.from_entrypoints()
-
-        kernel = None
-        for name, info in KF.find_kernels():
-            if info['language_info']['name'] == langname:
-                kernel = name
-                break
-
-        if not kernel:
-            raise RuntimeError('No kernel for language ' + langname)
+        kernel = kernel_from_filename(filename)
 
     global IDs
     ID = IDs
