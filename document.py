@@ -217,7 +217,8 @@ async def _Document(filename, connections, kernel, ID):
             # pprint((ID, msg, self), compact=True)
             # print(ID, msg.type, self.max_interrupt, msg.prio, self.body_prio, self.finished)
             if not await k.is_alive():
-                pprint(('not alive:', ID, msg, self), compact=True)
+                zapped_self = traverseKVs(self, lambda _k, v: v[:100] if isinstance(v, str) else v)
+                pprint(('not alive:', ID, msg, zapped_self, 'not alive'), compact=True)
                 return
             if msg.type == 'shutdown':
                 return
@@ -256,12 +257,14 @@ async def _Document(filename, connections, kernel, ID):
                 #     print(msg.data['text/plain'])
                 # if msg.type == 'stream': print(ID, msg)
                 if not self.running:
-                    print('detached message:', msg, self)
+                    zapped_self = traverseKVs(self, lambda _k, v: v[:100] if isinstance(v, str) else v)
+                    pprint(('detached message:', msg, zapped_self, 'detached_message'))
                 interrupted = msg.type == 'error' and msg.ename == 'KeyboardInterrupt'
                 msg.id = next_id()
                 if not interrupted:
                     if not self.now:
-                        print('detached message:', msg, self)
+                        zapped_self = traverseKVs(self, lambda _k, v: v[:100] if isinstance(v, str) else v)
+                        pprint(('detached message:', msg, zapped_self, 'detached_message'))
                     else:
                         self.now = dotdict(self.now, msgs=[*self.now.msgs, msg])
                 if msg.type == 'error':
