@@ -146,7 +146,7 @@ def _track(request):
 def root(request):
     return track('index.js')
 
-static_dir = os.environ.get('NEPTYNE_DEV_DIR', os.path.dirname(__file__))
+static_dir = os.environ.get('NEPTYNE_DEV_DIR', os.path.dirname(__file__) or '.')
 
 app.add_routes([
     web.static('/static/', static_dir, show_index=True, append_version=True),

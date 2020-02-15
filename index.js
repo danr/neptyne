@@ -1,4 +1,6 @@
 
+const DEBUG = window.location.hash == '#debug'
+
 // eighties
 const NAMED_COLOURS = {
   'black':          '#2d2d2d',
@@ -146,10 +148,91 @@ function activate(domdiff, root, websocket, state) {
 
   // console.log(state.cells)
 
-  websocket.onmessage = function on_message(msg) {
-    // console.log({msg})
-    update_cell_data(JSON.parse(msg.data))
-    schedule_refresh()
+  if (!DEBUG) {
+    websocket.onmessage = function on_message(msg) {
+      // console.log({msg})
+      update_cell_data(JSON.parse(msg.data))
+      schedule_refresh()
+    }
+  }
+
+  if (DEBUG) {
+    function make_cells(cursor, cancelled) {
+      console.warn('DEBUG', {cursor, cancelled})
+      const new_msg = s => ({
+        data: {'text/plain': s + '\n'},
+        msg_type: 'execute_result',
+      })
+      const new_cell = status => ({
+        status,
+        msgs: [],
+        prev_msgs: [],
+      })
+      const status = {}
+      const messages = []
+      for (let i = 0; i <= 20; ++i) {
+        const id = Math.floor(i / 3) + ''
+        messages.push({
+          id,
+          cat: 'prev_msgs',
+          msg: 'old ' + i
+        })
+      }
+      messages.push({
+        id: '1.quiet',
+        cat: 'prev_msgs',
+        msg: ''
+      })
+      messages.push({
+        id: '2.quiet',
+        cat: 'prev_msgs',
+        msg: ''
+      })
+      messages.sort((a, b) => a.id > b.id ? 1 : a.id == b.id ? 0 : -1)
+      const N = messages.length
+      for (let i = 0; i < N; ++i) {
+        const msg = {...messages[i]}
+        const id = msg.id
+        if (i < cursor) {
+          status[id] = 'done'
+          msg.cat = 'msgs'
+          msg.msg = msg.msg.replace('old', 'new')
+          messages.push(msg)
+        } else if (i == cursor) {
+          status[id] = cancelled ? 'cancelled' : 'executing'
+        } else if (i > cursor && !status[id]) {
+          status[id] = cancelled ? 'cancelled' : 'scheduled'
+        }
+      }
+      console.log(messages)
+      let cells = {}
+      for (const m of messages) {
+        if (!(m.id in cells)) {
+          cells[m.id] = new_cell(status[m.id])
+        }
+        if (m.msg.length) {
+          cells[m.id][m.cat].push(new_msg(m.msg))
+        }
+      }
+      return Object.keys(cells).sort().map(k => cells[k])
+    }
+    state.cursor = 5
+    state.cancelled = false
+    state.quiet = false
+    state.cells = make_cells(state.cursor, state.cancelled)
+    window.onkeydown = e => {
+      let prevent = true
+      if (e.key == 'ArrowUp') state.cursor -= 1
+      else if (e.key == 'ArrowDown') state.cursor += 1
+      else if (e.key == 'ArrowLeft') state.cancelled = !state.cancelled
+      else if (e.key == 'q') state.quiet = !state.quiet
+      else if (e.key == 's') state.quiet = !state.quiet
+      else prevent = false
+      prevent && e.preventDefault()
+      state.cursor = Math.max(0, state.cursor) // Math.min(N, state.cursor)
+      state.cells = make_cells(state.cursor, state.cancelled)
+      schedule_refresh()
+    }
   }
 
   schedule_refresh()
@@ -173,7 +256,7 @@ function activate(domdiff, root, websocket, state) {
       scheduled: 'bright-yellow',
     }
     const border_colour = colours[status] || colours.default
-    const nothing_yet = cell.status == 'executing' && msgs.filter(m => m.msg_type != 'execute_result').length == 0
+    const nothing_yet = cell.status == 'executing' && msgs.length == 0 // msgs.filter(m => m.msg_type != 'execute_result').length == 0
       || cell.status == 'scheduled'
     const is_image = msg => 'image/png' in msg.data || 'image/svg+xml' in msg.data
     const prev_msgs = prioritize_images(cell.prev_msgs)
@@ -183,7 +266,7 @@ function activate(domdiff, root, websocket, state) {
     if (prev_msgs.length > 0 && nothing_yet) {
       msgs = prev_msgs
     }
-    if (msgs.length) {
+    if (msgs.length || true) {
       return pre(
         FlexColumnLeft,
         ...msgs.map(msg_to_dom),
