@@ -3,22 +3,22 @@ const DEBUG = window.location.hash == '#debug'
 
 // eighties
 const NAMED_COLOURS = {
-  'black':          '#2d2d2d',
-  'bright-green':   '#393939',
-  'bright-yellow':  '#515151',
-  'bright-black':   '#747369',
-  'bright-blue':    '#a09f93',
-  'white':          '#d3d0c8',
-  'bright-magenta': '#e8e6df',
-  'bright-white':   '#f2f0ec',
-  'red':            '#f2777a',
-  'bright-red':     '#f99157',
-  'yellow':         '#ffcc66',
-  'green':          '#99cc99',
-  'cyan':           '#66cccc',
-  'blue':           '#6699cc',
-  'magenta':        '#cc99cc',
-  'bright-cyan':    '#d27b53',
+  'black':       '#2d2d2d',
+  'grey90':      '#393939',
+  'grey80':      '#515151',
+  'grey70':      '#747369',
+  'grey60':      '#a09f93',
+  'white':       '#d3d0c8',
+  'whiter':      '#e8e6df',
+  'whitest':     '#f2f0ec',
+  'red':         '#f2777a',
+  'bright-red':  '#f99157',
+  'yellow':      '#ffcc66',
+  'green':       '#99cc99',
+  'cyan':        '#66cccc',
+  'blue':        '#6699cc',
+  'magenta':     '#cc99cc',
+  'bright-cyan': '#d27b53',
 }
 
 function color_to_css(name, fallback) {
@@ -95,7 +95,6 @@ function activate(domdiff, root, websocket, state) {
       font-family: 'Consolas';
       font-weight: 400 !important;
       background: ${color_to_css('black')};
-      // background: linear-gradient(to bottom right, ${color_to_css('bright-green')} 20%, ${color_to_css('black')});
     }
     body {
       margin: 0;
@@ -196,7 +195,6 @@ function activate(domdiff, root, websocket, state) {
 
   if (DEBUG) {
     function make_cells(cursor, cancelled) {
-      console.warn('DEBUG', {cursor, cancelled})
       const new_msg = s => ({
         data: {'text/plain': s + '\n'},
         msg_type: 'execute_result',
@@ -297,8 +295,8 @@ function activate(domdiff, root, websocket, state) {
     const colours = {
       default: 'blue',
       cancelled: 'yellow',
-      scheduled: 'bright-yellow',
-    }
+      scheduled: 'grey80',
+          }
     let border_colour = colours[status] || colours.default
     const nothing_yet = cell.status == 'executing' && msgs.length == 0 // msgs.filter(m => m.msg_type != 'execute_result').length == 0
       || cell.status == 'scheduled'
@@ -335,7 +333,7 @@ function activate(domdiff, root, websocket, state) {
                 position: absolute;
                 right: 2px;
                 color:${color_to_css('white')};
-                background:${color_to_css('bright-green')};
+                background:${color_to_css('grey90')};
                 border: 2px ${color_to_css('black')} solid;
                 padding: 2px;
                 margin: 2px 4px 0px 4px;
@@ -353,12 +351,7 @@ function activate(domdiff, root, websocket, state) {
           // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(cell, 2, 2)),
           css`
             color:${color_to_css('white')};
-            background: ${color_to_css('bright-green')};
-            // background: linear-gradient(
-            //   to bottom,
-            //   ${color_to_css('bright-green')} 20%,
-            //   ${color_to_css('black')}
-            // );
+            background: ${color_to_css('grey90')};
             padding:0.4em;
             padding-left:0.5em;
             // margin-bottom: -0.5em;
