@@ -38,16 +38,6 @@ function activate(domdiff, root, websocket, state) {
 
   const {css, generate_class} = class_cache()
 
-  const Left = css`
-          position: absolute;
-          left: 0;
-          bottom: 0;
-        `
-  const Right = css`
-          position: absolute;
-          right: 0;
-          bottom: 0;
-        `
   const FlexColumnRight = css`
           display: flex;
           flex-direction: column;
@@ -68,25 +58,14 @@ function activate(domdiff, root, websocket, state) {
           flex-direction: row;
           align-items: flex-start;
         `
-  const WideChildren = css`
-          & * {
-            width: 100%;
-          }
-        `
 
   css`
-    html, body, #root, #root > pre {
-      width: 100wh;
-    }
-    pre {
-      white-space: pre-wrap;
-      // width: 100vw;
-      overflow: auto;
-    }
     * {
       box-sizing: border-box;
     }
     pre {
+      white-space: pre-wrap;
+      overflow: auto;
       margin: 0;
     }
     pre, body {
@@ -98,7 +77,6 @@ function activate(domdiff, root, websocket, state) {
     }
     body {
       margin: 0;
-      // overflow: hidden;
     }
     table {
       color: inherit;
@@ -124,28 +102,29 @@ function activate(domdiff, root, websocket, state) {
       return
     }
 
-    const right_inline = node => [
-      FlexRowTop,
-      css`justify-content: space-between`,
-      css`& > .${ContentBlock} { flex-grow: 1 }`,
-      node
-    ]
+    // console.log(state.cells)
 
-    console.log(state.cells)
+    const any_exec = state.cells.some(c => c.status == 'executing')
+    const any_canc = state.cells.some(c => c.status == 'cancelled')
+    const any_errd = state.cells.some(c => c.status == 'errored')
+    if (any_canc && !any_errd) {
+      for (const c of state.cells) {
+        if (c.status == 'cancelled') {
+          c.status = 'errored'
+          break
+        }
+      }
+    }
 
     const morph = div(
       id`root`,
-      css`
-        // height: 100%;
-        // width: 100%;
-        // overflow: hidden;
-      `,
       css`
        & > * {
          margin-bottom: 10px;
        }
       `,
       ...state.cells.flatMap(cell_to_dom),
+      !any_exec && !any_canc && !any_errd && indicator_dom('ok')
     )
 
     morph(root)
@@ -194,91 +173,42 @@ function activate(domdiff, root, websocket, state) {
   }
 
   if (DEBUG) {
-    function make_cells(cursor, cancelled) {
-      const new_msg = s => ({
-        data: {'text/plain': s + '\n'},
-        msg_type: 'execute_result',
-      })
-      const new_cell = status => ({
-        status,
-        msgs: [],
-        prev_msgs: [],
-      })
-      const status = {}
-      const messages = []
-      for (let i = 0; i <= 20; ++i) {
-        const id = Math.floor(i / 3) + ''
-        messages.push({
-          id,
-          cat: 'prev_msgs',
-          // msg: '.\n\.\nold 1234567891011121314151617181920212223242526272829303132333435363738394041424344454647484950515253545556575859606162636465666768697071727374757677787980' + i,
-          msg: '.\n\.\nold 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 ' + i,
-          // msg: '.\n\.\nold ' + i,
-        })
-      }
-      messages.push({
-        id: '1.quiet',
-        cat: 'prev_msgs',
-        msg: ''
-      })
-      messages.push({
-        id: '2.quiet',
-        cat: 'prev_msgs',
-        msg: ''
-      })
-      messages.sort((a, b) => a.id > b.id ? 1 : a.id == b.id ? 0 : -1)
-      const N = messages.length
-      for (let i = 0; i < N; ++i) {
-        const msg = {...messages[i]}
-        const id = msg.id
-        if (i < cursor) {
-          status[id] = 'done'
-          msg.cat = 'msgs'
-          msg.msg = msg.msg.replace('old', 'new')
-          messages.push(msg)
-        } else if (i == cursor) {
-          status[id] = cancelled ? 'cancelled' : 'executing'
-        } else if (i > cursor && !status[id]) {
-          status[id] = cancelled ? 'cancelled' : 'scheduled'
-        }
-      }
-      console.log(messages)
-      let cells = {}
-      for (const m of messages) {
-        if (!(m.id in cells)) {
-          cells[m.id] = new_cell(status[m.id])
-        }
-        if (m.msg.length) {
-          cells[m.id][m.cat].push(new_msg(m.msg))
-        }
-      }
-      return Object.keys(cells).sort().map(k => cells[k])
-    }
-    if (!(
-      'cursor' in state &&
-      'cancelled' in state
-    )) {
-      state.cursor = 5
-      state.cancelled = false
-    }
-    state.cells = make_cells(state.cursor, state.cancelled)
-    window.onkeydown = e => {
-      let act = true
-      if (e.key == 'ArrowUp') state.cursor -= 1
-      else if (e.key == 'ArrowDown') state.cursor += 1
-      else if (e.key == 'ArrowLeft') state.cancelled = !state.cancelled
-      else if (e.key == 'ArrowRight') state.cancelled = !state.cancelled
-      else act = false
-      if (act) {
-        e.preventDefault()
-        state.cursor = Math.max(0, state.cursor) // Math.min(N, state.cursor)
-        state.cells = make_cells(state.cursor, state.cancelled)
-        schedule_refresh()
-      }
-    }
+    debug_functionality(state)
   }
 
   schedule_refresh()
+
+  function indicator_dom(s) {
+    return div(
+      css`
+        position: sticky;
+        top: 1px;
+        bottom: 2em;
+      `,
+      div(
+        s,
+        id`indicator`,
+        css`&[data-loc=inside]::before {
+          content: "<"
+        }`,
+        css`&[data-loc=above]::before {
+          content: "v"
+        }`,
+        css`&[data-loc=below]::before {
+          content: "^"
+        }`,
+        css`
+          position: absolute;
+          right: 2px;
+          color:${color_to_css('white')};
+          background:${color_to_css('grey90')};
+          border: 2px ${color_to_css('black')} solid;
+          padding: 2px;
+          margin: 2px 4px 0px 4px;
+          border-radius: 2px;
+        `))
+  }
+
 
   function prioritize_images(msgs0) {
     const msgs = msgs0 || []
@@ -294,12 +224,13 @@ function activate(domdiff, root, websocket, state) {
     let msgs = prioritize_images(cell.msgs)
     const colours = {
       default: 'blue',
-      cancelled: 'yellow',
+      errored: 'yellow',
+      cancelled: 'grey80',
       scheduled: 'grey80',
-          }
+    }
     let border_colour = colours[status] || colours.default
-    const nothing_yet = cell.status == 'executing' && msgs.length == 0 // msgs.filter(m => m.msg_type != 'execute_result').length == 0
-      || cell.status == 'scheduled'
+    const nothing_yet = status == 'executing' && msgs.length == 0 // msgs.filter(m => m.msg_type != 'execute_result').length == 0
+      || status == 'scheduled'
 
     if (nothing_yet && status == 'executing') {
       border_colour = colours['scheduled']
@@ -310,42 +241,16 @@ function activate(domdiff, root, websocket, state) {
     const prev_some_img = prev_msgs.some(is_image)
     // console.log({nothing_yet, prev_some_img, prev_msgs, msgs})
     // console.log({nothing_yet, prev_msgs, msgs})
-    if (prev_msgs.length > 0 && nothing_yet) {
+    if (prev_msgs.length > 0 && nothing_yet || status == 'cancelled') {
       msgs = prev_msgs
     }
     if (msgs.length || true) {
       return [
-        cell.status == 'executing' &&
-          div(
-            div(
-              '...',
-              id`indicator`,
-              css`&[data-loc=inside]::before {
-                content: "<"
-              }`,
-              css`&[data-loc=above]::before {
-                content: "v"
-              }`,
-              css`&[data-loc=below]::before {
-                content: "^"
-              }`,
-              css`
-                position: absolute;
-                right: 2px;
-                color:${color_to_css('white')};
-                background:${color_to_css('grey90')};
-                border: 2px ${color_to_css('black')} solid;
-                padding: 2px;
-                margin: 2px 4px 0px 4px;
-                border-radius: 2px;
-              `),
-            css`
-              position: sticky;
-              top: 1px;
-              bottom: 2em;
-            `),
+        cell.status == 'executing' && indicator_dom('...'),
+        cell.status == 'errored' && indicator_dom('!!!'),
         pre(
           cell.status == 'executing' && id`executing`,
+          cell.status == 'errored' && id`executing`,
           // FlexColumnLeft,
           ...msgs.map(msg_to_dom),
           // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(cell, 2, 2)),
@@ -418,6 +323,91 @@ async function main() {
   root.id = 'root'
   window.state = (window.state || {})
   activate(domdiff, root, window.websocket, window.state)
+}
+
+function debug_functionality(state) {
+  function make_cells(cursor, cancelled) {
+    const new_msg = s => ({
+      data: {'text/plain': s + '\n'},
+      msg_type: 'execute_result',
+    })
+    const new_cell = status => ({
+      status,
+      msgs: [],
+      prev_msgs: [],
+    })
+    const status = {}
+    const messages = []
+    for (let i = 0; i <= 20; ++i) {
+      const id = Math.floor(i / 3) + ''
+      messages.push({
+        id,
+        cat: 'prev_msgs',
+        // msg: '.\n\.\nold 1234567891011121314151617181920212223242526272829303132333435363738394041424344454647484950515253545556575859606162636465666768697071727374757677787980' + i,
+        msg: '.\n\.\nold 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 ' + i,
+        // msg: '.\n\.\nold ' + i,
+      })
+    }
+    messages.push({
+      id: '1.quiet',
+      cat: 'prev_msgs',
+      msg: ''
+    })
+    messages.push({
+      id: '2.quiet',
+      cat: 'prev_msgs',
+      msg: ''
+    })
+    messages.sort((a, b) => a.id > b.id ? 1 : a.id == b.id ? 0 : -1)
+    const N = messages.length
+    for (let i = 0; i < N; ++i) {
+      const msg = {...messages[i]}
+      const id = msg.id
+      if (i < cursor) {
+        status[id] = 'done'
+        msg.cat = 'msgs'
+        msg.msg = msg.msg.replace('old', 'new')
+        messages.push(msg)
+      } else if (i == cursor) {
+        status[id] = cancelled ? 'cancelled' : 'executing'
+      } else if (i > cursor && !status[id]) {
+        status[id] = cancelled ? 'cancelled' : 'scheduled'
+      }
+    }
+    console.log(messages)
+    let cells = {}
+    for (const m of messages) {
+      if (!(m.id in cells)) {
+        cells[m.id] = new_cell(status[m.id])
+      }
+      if (m.msg.length) {
+        cells[m.id][m.cat].push(new_msg(m.msg))
+      }
+    }
+    return Object.keys(cells).sort().map(k => cells[k])
+  }
+  if (!(
+    'cursor' in state &&
+    'cancelled' in state
+  )) {
+    state.cursor = 5
+    state.cancelled = false
+  }
+  state.cells = make_cells(state.cursor, state.cancelled)
+  window.onkeydown = e => {
+    let act = true
+    if (e.key == 'ArrowUp') state.cursor -= 1
+    else if (e.key == 'ArrowDown') state.cursor += 1
+    else if (e.key == 'ArrowLeft') state.cancelled = !state.cancelled
+    else if (e.key == 'ArrowRight') state.cancelled = !state.cancelled
+    else act = false
+    if (act) {
+      e.preventDefault()
+      state.cursor = Math.max(0, state.cursor) // Math.min(N, state.cursor)
+      state.cells = make_cells(state.cursor, state.cancelled)
+      schedule_refresh()
+    }
+  }
 }
 
 main()
