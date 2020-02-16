@@ -75,6 +75,17 @@ function activate(domdiff, root, websocket, state) {
         `
 
   css`
+    html, body, #root, #root > pre {
+      width: 100wh;
+    }
+    pre {
+      white-space: pre-wrap;
+      // width: 100vw;
+      overflow: auto;
+    }
+    * {
+      box-sizing: border-box;
+    }
     pre {
       margin: 0;
     }
@@ -83,14 +94,12 @@ function activate(domdiff, root, websocket, state) {
       letter-spacing: -1px;
       font-family: 'Consolas';
       font-weight: 400 !important;
-      background: linear-gradient(to bottom right, ${color_to_css('bright-green')} 20%, ${color_to_css('black')});
+      background: ${color_to_css('black')};
+      // background: linear-gradient(to bottom right, ${color_to_css('bright-green')} 20%, ${color_to_css('black')});
     }
     body {
       margin: 0;
       // overflow: hidden;
-    }
-    span {
-      white-space: pre;
     }
     table {
       color: inherit;
@@ -102,6 +111,10 @@ function activate(domdiff, root, websocket, state) {
   window.schedule_refresh = function schedule_refresh() {
     rAF(actual_refresh)
     rAF = x => 0
+  }
+
+  if (state.obs) {
+    state.obs.disconnect()
   }
 
   function actual_refresh() {
@@ -124,8 +137,8 @@ function activate(domdiff, root, websocket, state) {
     const morph = div(
       id`root`,
       css`
-        height: 100vh;
-        width: 100vw;
+        // height: 100%;
+        // width: 100%;
         // overflow: hidden;
       `,
       css`
@@ -133,10 +146,35 @@ function activate(domdiff, root, websocket, state) {
          margin-bottom: 10px;
        }
       `,
-      ...state.cells.map(cell_to_dom),
+      ...state.cells.flatMap(cell_to_dom),
     )
 
     morph(root)
+
+    const executing = document.querySelector('#executing')
+    if (executing) {
+      if (state.obs) {
+        state.obs.disconnect()
+      }
+      state.obs = new IntersectionObserver(
+        e => {
+          const r = e[0].intersectionRatio
+          const {y} = executing.getBoundingClientRect()
+
+          const indicator = document.querySelector('#indicator')
+          indicator && indicator.setAttribute('data-loc',
+            r > 0 ? 'inside' :
+            y < 25 ? 'below' : 'above'
+          )
+        },
+        {
+          root: null,
+          rootMargin: "-25px 0px 0px 0px",
+          threshold: [0],
+        }
+      )
+      state.obs.observe(executing)
+    }
   }
 
   state.cells = state.cells || []
@@ -175,7 +213,9 @@ function activate(domdiff, root, websocket, state) {
         messages.push({
           id,
           cat: 'prev_msgs',
-          msg: 'old ' + i
+          // msg: '.\n\.\nold 1234567891011121314151617181920212223242526272829303132333435363738394041424344454647484950515253545556575859606162636465666768697071727374757677787980' + i,
+          msg: '.\n\.\nold 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 ' + i,
+          // msg: '.\n\.\nold ' + i,
         })
       }
       messages.push({
@@ -216,22 +256,27 @@ function activate(domdiff, root, websocket, state) {
       }
       return Object.keys(cells).sort().map(k => cells[k])
     }
-    state.cursor = 5
-    state.cancelled = false
-    state.quiet = false
+    if (!(
+      'cursor' in state &&
+      'cancelled' in state
+    )) {
+      state.cursor = 5
+      state.cancelled = false
+    }
     state.cells = make_cells(state.cursor, state.cancelled)
     window.onkeydown = e => {
-      let prevent = true
+      let act = true
       if (e.key == 'ArrowUp') state.cursor -= 1
       else if (e.key == 'ArrowDown') state.cursor += 1
       else if (e.key == 'ArrowLeft') state.cancelled = !state.cancelled
-      else if (e.key == 'q') state.quiet = !state.quiet
-      else if (e.key == 's') state.quiet = !state.quiet
-      else prevent = false
-      prevent && e.preventDefault()
-      state.cursor = Math.max(0, state.cursor) // Math.min(N, state.cursor)
-      state.cells = make_cells(state.cursor, state.cancelled)
-      schedule_refresh()
+      else if (e.key == 'ArrowRight') state.cancelled = !state.cancelled
+      else act = false
+      if (act) {
+        e.preventDefault()
+        state.cursor = Math.max(0, state.cursor) // Math.min(N, state.cursor)
+        state.cells = make_cells(state.cursor, state.cancelled)
+        schedule_refresh()
+      }
     }
   }
 
@@ -252,12 +297,16 @@ function activate(domdiff, root, websocket, state) {
     const colours = {
       default: 'blue',
       cancelled: 'yellow',
-      executing: 'green',
       scheduled: 'bright-yellow',
     }
-    const border_colour = colours[status] || colours.default
+    let border_colour = colours[status] || colours.default
     const nothing_yet = cell.status == 'executing' && msgs.length == 0 // msgs.filter(m => m.msg_type != 'execute_result').length == 0
       || cell.status == 'scheduled'
+
+    if (nothing_yet && status == 'executing') {
+      border_colour = colours['scheduled']
+    }
+
     const is_image = msg => 'image/png' in msg.data || 'image/svg+xml' in msg.data
     const prev_msgs = prioritize_images(cell.prev_msgs)
     const prev_some_img = prev_msgs.some(is_image)
@@ -267,25 +316,59 @@ function activate(domdiff, root, websocket, state) {
       msgs = prev_msgs
     }
     if (msgs.length || true) {
-      return pre(
-        FlexColumnLeft,
-        ...msgs.map(msg_to_dom),
-        // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(cell, 2, 2)),
-        css`
-          color:${color_to_css('white')};
-          background: linear-gradient(to bottom right, ${color_to_css('bright-green')} 20%, ${color_to_css('black')});
-          padding:0.4em;
-          padding-left:0.5em;
-          // margin-bottom: -0.5em;
-          // margin-top: 0.1em;
-          // margin-left: 0.2em;
-          // z-index: 1;
-          border-left: 0.1em ${color_to_css(border_colour)} solid;
-          // overflow: overlay;
-          // max-height: 50vh;
-          // font-size: 0.9em;
-          // order:-1;
-        `)
+      return [
+        cell.status == 'executing' &&
+          div(
+            div(
+              '...',
+              id`indicator`,
+              css`&[data-loc=inside]::before {
+                content: "<"
+              }`,
+              css`&[data-loc=above]::before {
+                content: "v"
+              }`,
+              css`&[data-loc=below]::before {
+                content: "^"
+              }`,
+              css`
+                position: absolute;
+                right: 2px;
+                color:${color_to_css('white')};
+                background:${color_to_css('bright-green')};
+                border: 2px ${color_to_css('black')} solid;
+                padding: 2px;
+                margin: 2px 4px 0px 4px;
+                border-radius: 2px;
+              `),
+            css`
+              position: sticky;
+              top: 1px;
+              bottom: 2em;
+            `),
+        pre(
+          cell.status == 'executing' && id`executing`,
+          // FlexColumnLeft,
+          ...msgs.map(msg_to_dom),
+          // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(cell, 2, 2)),
+          css`
+            color:${color_to_css('white')};
+            background: ${color_to_css('bright-green')};
+            // background: linear-gradient(
+            //   to bottom,
+            //   ${color_to_css('bright-green')} 20%,
+            //   ${color_to_css('black')}
+            // );
+            padding:0.4em;
+            padding-left:0.5em;
+            // margin-bottom: -0.5em;
+            // margin-top: 0.1em;
+            // margin-left: 0.2em;
+            border-left: 0.1em ${color_to_css(border_colour)} solid;
+            // overflow: visible;
+            // font-size: 0.9em;
+        `),
+      ]
     }
   }
 
