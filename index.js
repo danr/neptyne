@@ -55,9 +55,8 @@ function activate(domdiff, root, websocket, state) {
     pre {
       white-space: pre-wrap;
       overflow: auto;
-      margin: 0;
     }
-    pre, body {
+    body {
       font-size: 18px;
       letter-spacing: -1px;
       font-family: 'Consolas';
@@ -120,8 +119,14 @@ function activate(domdiff, root, websocket, state) {
     const morph = div(
       id`root`,
       css`
-       & > * {
-         margin-bottom: 10px;
+       & > pre {
+         color: ${colors.white};
+         background: ${colors.grey90};
+         margin: 8px;
+         margin-bottom: 12px;
+         padding: 4px;
+         padding-left: 6px;
+         // min-height: 8px;
        }
       `,
       ...state.cells.map(cell_to_dom),
@@ -133,9 +138,10 @@ function activate(domdiff, root, websocket, state) {
           position: fixed;
           bottom: 0px;
           right: 0px;
-          margin: 2px;
+          margin: 4px;
           border: 2px ${colors.black} solid;
           padding: 2px 4px;
+          padding-bottom: 3px;
           color: ${colors.white};
           background: ${colors.grey90};
         `)
@@ -168,6 +174,7 @@ function activate(domdiff, root, websocket, state) {
   schedule_refresh()
 
   function prioritize_images(msgs0) {
+    // const is_image = msg => 'image/png' in msg.data || 'image/svg+xml' in msg.data
     const msgs = msgs0 || []
     if (msgs.some(m => m.msg_type == 'display_data')) {
       return msgs.filter(m => m.msg_type != 'execute_result')
@@ -187,34 +194,34 @@ function activate(domdiff, root, websocket, state) {
       scheduled: 'grey80',
     }
     let border_colour = colours[status] || colours.default
-    const nothing_yet = status == 'executing' && msgs.length == 0
+    let grad_bottom = null
+    const prev_msgs = prioritize_images(cell.prev_msgs)
+    const nothing_yet = (status == 'executing' && msgs.length == 0 && prev_msgs.length > 0)
       || status == 'scheduled'
 
     if (nothing_yet && status == 'executing') {
-      border_colour = colours['scheduled']
+      grad_bottom = colours['scheduled']
     }
-    const is_image = msg => 'image/png' in msg.data || 'image/svg+xml' in msg.data
-    const prev_msgs = prioritize_images(cell.prev_msgs)
     if (prev_msgs.length > 0 && nothing_yet || status == 'cancelled') {
       msgs = prev_msgs
     }
-    if (msgs.length || true) {
+    if (msgs.length) {
       return pre(
         // FlexColumnLeft,
         ...msgs.map(msg_to_dom),
         // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(cell, 2, 2)),
-        css`
-          color: ${colors.white};
-          background: ${colors.grey90};
-          padding:0.4em;
-          padding-left:0.5em;
-          // margin-bottom: -0.5em;
-          // margin-top: 0.1em;
-          // margin-left: 0.2em;
-          border-left: 0.1em ${colors[border_colour]} solid;
-          // overflow: visible;
-          // font-size: 0.9em;
-      `)
+        grad_bottom
+        ? css`
+          border-image: linear-gradient(to bottom,
+            ${colors[border_colour]} 0%,
+            ${colors[grad_bottom]} 25%
+          );
+          border-image-slice: 1;
+          border-left: 2px solid;
+        `
+        : css`
+          border-left: 2px ${colors[border_colour]} solid;
+        `)
     }
   }
 
