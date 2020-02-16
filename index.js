@@ -2,7 +2,7 @@
 const DEBUG = window.location.hash == '#debug'
 
 // eighties
-const NAMED_COLOURS = {
+const colors = {
   'black':       '#2d2d2d',
   'grey90':      '#393939',
   'grey80':      '#515151',
@@ -12,24 +12,13 @@ const NAMED_COLOURS = {
   'whiter':      '#e8e6df',
   'whitest':     '#f2f0ec',
   'red':         '#f2777a',
-  'bright-red':  '#f99157',
+  'orange':      '#f99157',
   'yellow':      '#ffcc66',
   'green':       '#99cc99',
   'cyan':        '#66cccc',
   'blue':        '#6699cc',
   'magenta':     '#cc99cc',
-  'bright-cyan': '#d27b53',
-}
-
-function color_to_css(name, fallback) {
-  // use class cache?
-  if (fallback && (name == 'default' || name == '')) {
-    return color_to_css(fallback)
-  } else if (name in NAMED_COLOURS) {
-    return NAMED_COLOURS[name]
-  } else {
-    return name
-  }
+  'brown': '#d27b53',
 }
 
 function activate(domdiff, root, websocket, state) {
@@ -73,7 +62,7 @@ function activate(domdiff, root, websocket, state) {
       letter-spacing: -1px;
       font-family: 'Consolas';
       font-weight: 400 !important;
-      background: ${color_to_css('black')};
+      background: ${colors.black};
     }
     body {
       margin: 0;
@@ -90,11 +79,21 @@ function activate(domdiff, root, websocket, state) {
     rAF = x => 0
   }
 
-  if (state.obs) {
-    state.obs.disconnect()
-  }
-
   function actual_refresh() {
+
+    {
+      const any_canc = state.cells.some(c => c.status == 'cancelled')
+      const any_errd = state.cells.some(c => c.status == 'errored')
+      if (any_canc && !any_errd) {
+        for (const c of state.cells) {
+          if (c.status == 'cancelled') {
+            c.status = 'errored'
+            break
+          }
+        }
+      }
+    }
+
 
     rAF = k => window.requestAnimationFrame(k)
 
@@ -104,16 +103,18 @@ function activate(domdiff, root, websocket, state) {
 
     // console.log(state.cells)
 
-    const any_exec = state.cells.some(c => c.status == 'executing')
-    const any_canc = state.cells.some(c => c.status == 'cancelled')
-    const any_errd = state.cells.some(c => c.status == 'errored')
-    if (any_canc && !any_errd) {
-      for (const c of state.cells) {
-        if (c.status == 'cancelled') {
-          c.status = 'errored'
-          break
-        }
-      }
+    const exec_ix = state.cells.findIndex(c => c.status == 'executing')
+    const errd_ix = state.cells.findIndex(c => c.status == 'errored')
+    const N = state.cells.length
+
+    let status_bar
+
+    if (exec_ix != -1) {
+      status_bar = span('running cell ', 1 + exec_ix, '/', N, css`color: ${colors.yellow}`)
+    } else if (errd_ix != -1) {
+      status_bar = span('errored on cell ', 1 + errd_ix, css`color: ${colors.brown}`)
+    } else {
+      status_bar = span('ready', css`color: ${colors.green}`)
     }
 
     const morph = div(
@@ -123,36 +124,24 @@ function activate(domdiff, root, websocket, state) {
          margin-bottom: 10px;
        }
       `,
-      ...state.cells.flatMap(cell_to_dom),
-      !any_exec && !any_canc && !any_errd && indicator_dom('ok')
+      ...state.cells.map(cell_to_dom),
+      div(
+        status_bar,
+        css`
+          display: inline-block;
+          height: 22px;
+          position: fixed;
+          bottom: 0px;
+          right: 0px;
+          margin: 2px;
+          border: 2px ${colors.black} solid;
+          padding: 2px 4px;
+          color: ${colors.white};
+          background: ${colors.grey90};
+        `)
     )
 
     morph(root)
-
-    const executing = document.querySelector('#executing')
-    if (executing) {
-      if (state.obs) {
-        state.obs.disconnect()
-      }
-      state.obs = new IntersectionObserver(
-        e => {
-          const r = e[0].intersectionRatio
-          const {y} = executing.getBoundingClientRect()
-
-          const indicator = document.querySelector('#indicator')
-          indicator && indicator.setAttribute('data-loc',
-            r > 0 ? 'inside' :
-            y < 25 ? 'below' : 'above'
-          )
-        },
-        {
-          root: null,
-          rootMargin: "-25px 0px 0px 0px",
-          threshold: [0],
-        }
-      )
-      state.obs.observe(executing)
-    }
   }
 
   state.cells = state.cells || []
@@ -178,38 +167,6 @@ function activate(domdiff, root, websocket, state) {
 
   schedule_refresh()
 
-  function indicator_dom(s) {
-    return div(
-      css`
-        position: sticky;
-        top: 1px;
-        bottom: 2em;
-      `,
-      div(
-        s,
-        id`indicator`,
-        css`&[data-loc=inside]::before {
-          content: "<"
-        }`,
-        css`&[data-loc=above]::before {
-          content: "v"
-        }`,
-        css`&[data-loc=below]::before {
-          content: "^"
-        }`,
-        css`
-          position: absolute;
-          right: 2px;
-          color:${color_to_css('white')};
-          background:${color_to_css('grey90')};
-          border: 2px ${color_to_css('black')} solid;
-          padding: 2px;
-          margin: 2px 4px 0px 4px;
-          border-radius: 2px;
-        `))
-  }
-
-
   function prioritize_images(msgs0) {
     const msgs = msgs0 || []
     if (msgs.some(m => m.msg_type == 'display_data')) {
@@ -224,49 +181,40 @@ function activate(domdiff, root, websocket, state) {
     let msgs = prioritize_images(cell.msgs)
     const colours = {
       default: 'blue',
-      errored: 'yellow',
+      executing: 'yellow',
+      errored: 'brown',
       cancelled: 'grey80',
       scheduled: 'grey80',
     }
     let border_colour = colours[status] || colours.default
-    const nothing_yet = status == 'executing' && msgs.length == 0 // msgs.filter(m => m.msg_type != 'execute_result').length == 0
+    const nothing_yet = status == 'executing' && msgs.length == 0
       || status == 'scheduled'
 
     if (nothing_yet && status == 'executing') {
       border_colour = colours['scheduled']
     }
-
     const is_image = msg => 'image/png' in msg.data || 'image/svg+xml' in msg.data
     const prev_msgs = prioritize_images(cell.prev_msgs)
-    const prev_some_img = prev_msgs.some(is_image)
-    // console.log({nothing_yet, prev_some_img, prev_msgs, msgs})
-    // console.log({nothing_yet, prev_msgs, msgs})
     if (prev_msgs.length > 0 && nothing_yet || status == 'cancelled') {
       msgs = prev_msgs
     }
     if (msgs.length || true) {
-      return [
-        cell.status == 'executing' && indicator_dom('...'),
-        cell.status == 'errored' && indicator_dom('!!!'),
-        pre(
-          cell.status == 'executing' && id`executing`,
-          cell.status == 'errored' && id`executing`,
-          // FlexColumnLeft,
-          ...msgs.map(msg_to_dom),
-          // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(cell, 2, 2)),
-          css`
-            color:${color_to_css('white')};
-            background: ${color_to_css('grey90')};
-            padding:0.4em;
-            padding-left:0.5em;
-            // margin-bottom: -0.5em;
-            // margin-top: 0.1em;
-            // margin-left: 0.2em;
-            border-left: 0.1em ${color_to_css(border_colour)} solid;
-            // overflow: visible;
-            // font-size: 0.9em;
-        `),
-      ]
+      return pre(
+        // FlexColumnLeft,
+        ...msgs.map(msg_to_dom),
+        // pre(css`display:none;color:white;font-size:0.8em`, JSON.stringify(cell, 2, 2)),
+        css`
+          color: ${colors.white};
+          background: ${colors.grey90};
+          padding:0.4em;
+          padding-left:0.5em;
+          // margin-bottom: -0.5em;
+          // margin-top: 0.1em;
+          // margin-left: 0.2em;
+          border-left: 0.1em ${colors[border_colour]} solid;
+          // overflow: visible;
+          // font-size: 0.9em;
+      `)
     }
   }
 

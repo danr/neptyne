@@ -17,11 +17,13 @@ export function Tag(name, children) {
         next_attrs[k].push(child[k])
       }
       return false
-    } else if (child && type != 'string' && type != 'function') {
-      throw new Error(`Child to ${name} needs to be false, string or function (is ${child} with type ${type})`)
+    } else if (type == 'boolean') {
+      return false
+    } else if (type != 'string' && type != 'function' && type != 'number') {
+      throw new Error(`Child to ${name} needs to be boolean, string, number or function (is ${child} with type ${type})`)
     }
-    return child
-  })
+    return true
+  }).map(ch => typeof ch == 'number' ? ch + '' : ch)
 
   for (const k in next_attrs) {
     if (k[0] == 'o' && k[1] == 'n') {
