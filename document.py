@@ -183,7 +183,9 @@ async def _Document(filename, connections, kernel, ID):
         except Exception as e:
             print(ID, '*** INTERNAL ERROR in iopub handler ***')
             import traceback as tb
-            tb.print_ID, exc()
+            tb.print_exc()
+            pprint(msg.header)
+            pprint(msg.content)
 
     k.add_handler(handler, 'iopub')
 
