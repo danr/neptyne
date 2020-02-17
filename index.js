@@ -122,6 +122,33 @@ function activate(domdiff, root, websocket, state) {
       status_bar = span('ready', css`color: ${colors.green}`)
     }
 
+    const rix = (xs, f) => {
+      const i = xs.slice().reverse().findIndex(f)
+      console.log({i})
+      if (i == -1) {
+        return i
+      } else {
+        return xs.length - i - 1
+      }
+    }
+
+    let cells = state.cells
+
+    const clear = rix(
+      cells,
+      c =>
+        c.msgs &&
+        c.msgs.length == 1 &&
+        c.status == 'done' &&
+        (
+          c.msgs[0].data['text/plain'] == "'clear'" ||
+          c.msgs[0].data['text/plain'] == '"clear"'
+        ))
+
+    if (clear != -1) {
+      cells = cells.slice(clear + 1)
+    }
+
     const morph = div(
       id`root`,
       css`
@@ -135,7 +162,7 @@ function activate(domdiff, root, websocket, state) {
          // min-height: 8px;
        }
       `,
-      ...state.cells.map(cell_to_dom),
+      ...cells.map(cell_to_dom),
       div(
         status_bar,
         css`
