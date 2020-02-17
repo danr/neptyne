@@ -184,18 +184,26 @@ async def main():
         port = 8234
         host = '127.0.0.1'
         args = list(sys.argv[1:])
-        while len(args) >= 2 and args[0].startswith('-'):
-            if args[0].startswith('-p'):
+        browser = False
+        while len(args) >= 1 and args[0].startswith('-'):
+            two = len(args) >= 2
+            if args[0] == '--browser':
+                browser = True
+                args = args[1:]
+            elif two and args[0].startswith('-p'):
                 port = int(args[1])
                 args = args[2:]
-            elif args[0].startswith('-b'):
+            elif two and args[0].startswith('-b'):
                 host = args[1]
                 args = args[2:]
-            elif args[0].startswith('-h'):
+            elif two and args[0].startswith('-h'):
                 print('neptyne [-p PORT] [-b BIND_ADDR] [FILES...]')
                 sys.exit(0)
             else:
                 raise 'Unknown flag: ' + args[0]
+        if browser:
+            import subprocess
+            subprocess.Popen(f'chromium --app=http://localhost:{port} & disown', shell=True)
         runner = web.AppRunner(app, access_log_format='%t %a %s %r')
         await runner.setup()
         site = web.TCPSite(runner, host, port)
