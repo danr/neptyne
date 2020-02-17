@@ -81,7 +81,7 @@ def neptyne-complete %{
     }
 }
 
-def neptyne-complete %{
+def neptyne-inspect %{
     eval -draft -no-hooks %{
         exec ';Gg<a-;>'
         neptyne-request inspect
