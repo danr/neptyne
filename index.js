@@ -68,6 +68,12 @@ function activate(domdiff, root, websocket, state) {
     }
     table {
       color: inherit;
+      font-size: unset;
+      background: ${colors.grey80};
+    }
+    td, th {
+      background: ${colors.grey90};
+      padding: 2px 5px;
     }
   `
 
@@ -238,8 +244,9 @@ function activate(domdiff, root, websocket, state) {
         const div = document.createElement('div')
         // div.style.background = 'white'
         // div.style.display = 'inline-block'
+        div.style['white-space'] = 'normal'
         div.foreign = true
-        div.innerHTML = html || svg
+        div.innerHTML = (html || svg).replace(/<table border="\d*"/g, '<table')
         return div
       } else if (png) {
         const img = document.createElement('img')
