@@ -18,7 +18,7 @@ connections = []
 
 docs = {}
 
-async def watch(connections, initial_files=None):
+async def watch(connections, initial_files=[]):
 
     assert not docs, 'Watch already started'
 
@@ -27,7 +27,7 @@ async def watch(connections, initial_files=None):
             docs[filename] = await Document(filename, connections)
         docs[filename].new_body(body)
 
-    for filename in initial_files or []:
+    for filename in initial_files:
         await do(filename, open(filename, 'r').read())
 
     watcher = aionotify.Watcher()
@@ -38,7 +38,7 @@ async def watch(connections, initial_files=None):
         event = await watcher.get_event()
         # print('event:', event)
         filename = event.name
-        if filename in (initial_files or []):
+        if filename in initial_files:
             body = open(filename, 'r').read()
             await do(filename, body)
         if filename == '.requests':
@@ -53,9 +53,14 @@ async def watch(connections, initial_files=None):
                     body = '\n'.join(lines[i+1:])
                     break
                 params[k] = v
+            params.body = body
             # print(pformat(params))
             if params.type == 'process':
                 await do(params.bufname, body)
+            elif params.type == 'restart':
+                await docs[params.bufname].restart()
+            elif params.type == 'complete':
+                await docs[params.bufname].complete(**params)
             else:
                 print('Unknown request:', pformat(params))
 
@@ -197,7 +202,7 @@ async def main():
                 host = args[1]
                 args = args[2:]
             elif two and args[0].startswith('-h'):
-                print('neptyne [-p PORT] [-b BIND_ADDR] [FILES...]')
+                print('neptyne [-p PORT] [-b BIND_ADDR] --browser [FILES...]')
                 sys.exit(0)
             else:
                 raise 'Unknown flag: ' + args[0]

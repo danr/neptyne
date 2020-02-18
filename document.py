@@ -141,8 +141,11 @@ async def _Document(filename, connections, kernel, ID):
 
     inbox = asyncio.Queue()
 
-    async def close():
-        this.closed = True
+    async def restart():
+        await close(restart=True)
+
+    async def close(restart=False):
+        this.closed = not restart
         _documents.remove(this)
         inbox.put_nowait(dotdict(type='shutdown'))
         await k.shutdown()
@@ -187,10 +190,22 @@ async def _Document(filename, connections, kernel, ID):
             pprint(msg.header)
             pprint(msg.content)
 
+    def shell_handler(msg, *args, **kws):
+        try:
+            print(msg, args, kws)
+        except Exception as e:
+            print(ID, '*** INTERNAL ERROR in shell handler ***')
+            import traceback as tb
+            tb.print_exc()
+
     k.add_handler(handler, 'iopub')
+    # k.add_handler(shell_handler, 'shell')
 
     def broadcast():
         inbox.put_nowait(dotdict(type='broadcast'))
+
+    async def complete(**params):
+        inbox.put_nowait(dotdict(params))
 
     async def process():
         self = dotdict()
@@ -224,6 +239,38 @@ async def _Document(filename, connections, kernel, ID):
                 return
             if msg.type == 'shutdown':
                 return
+            elif msg.type == 'complete':
+                for kk, v in msg.items():
+                    if 'cursor_' in kk:
+                        msg[kk] = int(v)
+                reply = await k.complete(msg.body, msg.cursor_byte_offset)
+                if True: # reply.header['msg_id'] == msg_id:
+
+                    def qq(msg):
+                        return msg.replace('"', '""').replace('%', '%%')
+
+                    def kak_send(txt):
+                        from subprocess import Popen, PIPE
+                        txt = f'eval -client {msg.client} "{qq(txt)}"'
+                        p = Popen(['kak', '-p', str(msg.session).rstrip()], stdin=PIPE)
+                        p.stdin.write(txt.encode())
+                        p.stdin.flush()
+                        p.stdin.close()
+                        p.wait()
+
+                    line, column = msg.cursor_line, msg.cursor_column
+                    content = dotdict(reply.content)
+                    matches = content.matches
+                    if not matches:
+                        return
+                    txts = [f'"{qq(m)}||{qq(m)}"' for m in matches]
+                    dist = msg.cursor_byte_offset - content.cursor_start
+                    cmd = [f'set window neptyne_completions {line}.{column - dist}@{msg.timestamp}']
+                    print(cmd, txts)
+                    txt = ' '.join(cmd + txts)
+                    kak_send(txt)
+
+
             elif msg.type == 'broadcast':
                 send_broadcast = True
             elif msg.type == 'status':
