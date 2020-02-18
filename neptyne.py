@@ -22,10 +22,14 @@ async def watch(connections, initial_files=[]):
 
     assert not docs, 'Watch already started'
 
-    async def do(filename, body):
+    async def doc(filename):
         if filename not in docs:
             docs[filename] = await Document(filename, connections)
-        docs[filename].new_body(body)
+        return docs[filename]
+
+    async def do(filename, body):
+        d = await doc(filename)
+        d.new_body(body)
 
     for filename in initial_files:
         await do(filename, open(filename, 'r').read())
@@ -54,13 +58,15 @@ async def watch(connections, initial_files=[]):
                     break
                 params[k] = v
             params.body = body
+            for k, v in params.items():
+                if 'cursor_' in k:
+                    params[k] = int(v)
             # print(pformat(params))
             if params.type == 'process':
                 await do(params.bufname, body)
-            elif params.type == 'restart':
-                await docs[params.bufname].restart()
-            elif params.type == 'complete':
-                await docs[params.bufname].complete(**params)
+            elif params.type in {'restart', 'complete', 'inspect'}:
+                d = await doc(params.bufname)
+                await d[params.type](**params)
             else:
                 print('Unknown request:', pformat(params))
 
