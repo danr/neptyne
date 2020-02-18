@@ -56,6 +56,9 @@ function activate(domdiff, root, websocket, state) {
       white-space: pre-wrap;
       overflow: auto;
     }
+    a {
+      color: ${colors.blue};
+    }
     body {
       font-size: 18px;
       letter-spacing: -1px;
@@ -160,6 +163,12 @@ function activate(domdiff, root, websocket, state) {
          padding: 4px;
          padding-left: 6px;
          // min-height: 8px;
+       }
+       & > pre p, & > pre h1, & > pre h2, & > pre h3 {
+        font-family: sans-serif;
+        letter-spacing: normal;
+        white-space: normal;
+        max-width: 16cm;
        }
       `,
       ...cells.map(cell_to_dom),
