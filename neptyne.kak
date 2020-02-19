@@ -105,10 +105,10 @@ def neptyne-complete %{
     }
 }
 
-def neptyne-inspect %{
+def neptyne-inspect -params 0..1 %{
     eval -draft -no-hooks %{
         exec ';Gg<a-;>'
-        neptyne-request inspect
+        neptyne-request inspect %arg{@}
     }
 }
 

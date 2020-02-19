@@ -88,7 +88,7 @@ def kak_complete(params, reply):
     matches = content.matches
     if not matches:
         return
-    msgs = [f'"{kak_esc(m)}||{kak_esc(m)}"' for m in matches]
+    msgs = [f'"{kak_esc(m)}|neptyne-inspect menu|{kak_esc(m)}"' for m in matches]
     dist = params.cursor_byte_offset - content.cursor_start
     cmd = [f'set window neptyne_completions {line}.{column - dist}@{params.timestamp}']
     msg = ' '.join(cmd + msgs)
@@ -105,7 +105,11 @@ def kak_inspect(params, reply):
     if content.data and 'text/plain' in content.data:
         txt = content.data['text/plain']
         txt = unansi(txt)
-        msg = f'info "{kak_esc(txt)}"'
+        style = ''
+        if params.args.split()[-1] == 'menu':
+            style = '-style menu'
+        print(params.args, style)
+        msg = f'info {style} "{kak_esc(txt)}"'
         kak_send(msg, params)
 
 
