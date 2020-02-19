@@ -143,10 +143,8 @@ function activate(domdiff, root, websocket, state) {
         c.msgs &&
         c.msgs.length == 1 &&
         c.status == 'done' &&
-        (
-          c.msgs[0].data['text/plain'] == "'clear'" ||
-          c.msgs[0].data['text/plain'] == '"clear"'
-        ))
+        c.msgs[0].data['text/plain'].match(/^[\"'[\d\]\s]*clear[\"']*$/)
+        )
 
     if (clear != -1) {
       cells = cells.slice(clear + 1)
