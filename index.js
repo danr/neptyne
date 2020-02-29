@@ -80,6 +80,12 @@ function activate(domdiff, root, websocket, state) {
     }
   `
 
+  // map cells -> dom elements that should only be created once
+  if (!state.foreign_side_effects) {
+    state.foreign_side_effects = {}
+  }
+  state.foreign_javascript_queue = []
+
   let rAF = k => window.requestAnimationFrame(k)
 
   window.schedule_refresh = function schedule_refresh() {
@@ -101,7 +107,6 @@ function activate(domdiff, root, websocket, state) {
         }
       }
     }
-
 
     rAF = k => window.requestAnimationFrame(k)
 
@@ -127,7 +132,6 @@ function activate(domdiff, root, websocket, state) {
 
     const rix = (xs, f) => {
       const i = xs.slice().reverse().findIndex(f)
-      console.log({i})
       if (i == -1) {
         return i
       } else {
@@ -149,6 +153,8 @@ function activate(domdiff, root, websocket, state) {
     if (clear != -1) {
       cells = cells.slice(clear + 1)
     }
+
+    state.seen_html = {}
 
     const morph = div(
       id`root`,
@@ -188,6 +194,17 @@ function activate(domdiff, root, websocket, state) {
     )
 
     morph(root)
+
+    const global_eval = eval
+    state.foreign_javascript_queue.forEach(global_eval)
+    state.foreign_javascript_queue = []
+
+    Object.keys(state.foreign_side_effects).forEach(html => {
+      if (!state.seen_html[html]) {
+        delete state.foreign_side_effects[html]
+      }
+    })
+    state.seen_html = []
   }
 
   state.cells = state.cells || []
@@ -201,7 +218,6 @@ function activate(domdiff, root, websocket, state) {
 
   if (!DEBUG) {
     websocket.onmessage = function on_message(msg) {
-      // console.log({msg})
       update_cell_data(JSON.parse(msg.data))
       schedule_refresh()
     }
@@ -270,18 +286,36 @@ function activate(domdiff, root, websocket, state) {
     const mimes = msg.data
     if (mimes) {
       // console.log(mimes)
-      const html = mimes['text/html']
-      const svg = mimes['image/svg+xml']
+      const html = mimes['text/html'] || mimes['image/svg+xml']
       const png = mimes['image/png']
       const plain = mimes['text/plain']
-      if (html || svg) {
-        const div = document.createElement('div')
-        // div.style.background = 'white'
-        // div.style.display = 'inline-block'
-        div.style['white-space'] = 'normal'
-        div.foreign = true
-        div.innerHTML = (html || svg).replace(/<table border="\d*"/g, '<table')
-        return div
+      if (html) {
+        if (html.match(/<script /)) {
+          state.seen_html[html] = true
+          const old = state.foreign_side_effects[html]
+          if (old) {
+            // console.log('Reusing', html.slice(0, 61).trim())
+            return old
+          }
+          // console.log('Creating', html.slice(0, 61).trim())
+          const div = document.createElement('div')
+          div.style['white-space'] = 'normal'
+          div.foreign = true
+          div.innerHTML = html
+          Array.from(div.querySelectorAll('script')).forEach(s => {
+            const t = s.innerHTML
+            s.remove()
+            state.foreign_javascript_queue.push(t)
+          })
+          state.foreign_side_effects[html] = div
+          return div
+        } else {
+          const div = document.createElement('div')
+          div.style['white-space'] = 'normal'
+          div.foreign = true
+          div.innerHTML = html.replace(/<table border="\d*"/g, '<table')
+          return div
+        }
       } else if (png) {
         const img = document.createElement('img')
         img.style.background = 'white'
