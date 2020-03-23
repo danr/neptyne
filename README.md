@@ -9,7 +9,7 @@ Editor-agnostic jupyter kernel interaction and [kakoune](http://kakoune.org) int
 Have the python kernel installed and run
 
 ```
-python install . --user
+pip install . --user
 ```
 
 Now run
