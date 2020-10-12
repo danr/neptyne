@@ -14,7 +14,7 @@ setup(
     author="Dan Rosén",
     entry_points={
         'console_scripts': [
-            'neptyne = neptyne:sync_main',
+            'neptyne = neptyne:main',
         ]
     },
     py_modules=["neptyne"],

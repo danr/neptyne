@@ -78,6 +78,8 @@ async def websocket_connection(request):
     websocket = web.WebSocketResponse()
     await websocket.prepare(request)
 
+    print(request)
+
     q = asyncio.Queue()
 
     async def fwd(filename, state):
@@ -87,104 +89,42 @@ async def websocket_connection(request):
     for _, d in docs.items():
         d.broadcast()
 
-
     sent = set()
 
     while True:
         filename, state = await q.get()
+        print('sending to ws')
         await websocket.send_json(state.all)
+        print('sending to ws, done!')
 
     return websocket
 
-def track(url):
-    url = repr(url)
-    track="""
-        "use strict";
-        {
-          let i = 0
-          const reimported = {}
-          const sloppy = s => s.replace(/.*\//g, '')
-          window.reimport = src => {
-            // console.log('Reimporting', src)
-            reimported[sloppy(src)] = true
-            return import('./static/' + src + '#' + i++)
-          }
-          const tracked = {}
-          window.track = src => {
-            if (!tracked[src]) {
-              console.log('Tracking', src)
-              tracked[src] = true;
-              reimport(src)
-            }
-          }
-          try {
-            if (window.track_ws.readyState != websocket.OPEN) {
-              window.track_ws.close()
-            }
-          } catch {}
-          const ws_url = 'ws://' + window.location.host + '/inotify'
-          window.track_ws = new WebSocket(ws_url)
-          window.track_ws.onmessage = msg => {
-            // console.log(sloppy(msg.data), ...Object.keys(reimported))
-            const upd = sloppy(msg.data)
-            if (reimported[upd]) {
-              Object.keys(tracked).forEach(src => {
-                console.log('Reloading', src, 'because', upd, 'was updated')
-                reimport(src)
-              })
-            }
-          }
-        }
-    """
+@routes.get('/')
+def root(request):
     text=f"""
+    <!DOCTYPE html>
     <html>
     <head>
     <script type="module">
-        {track}
-        track({url})
+      console.error("todo add bundled file here")
     </script>
     </head>
-    <body></body>
+    <body>
+    <div id=root/>
+    </body>
     </html>
     """
     return web.Response(text=text, content_type='text/html')
 
-@routes.get('/{track}.js')
-def _track(request):
-    return track(request.match_info.get('track') + '.js')
+# static_dir = os.environ.get('NEPTYNE_DEV_DIR', os.path.dirname(__file__) or '.')
 
-@routes.get('/')
-def root(request):
-    return track('index.js')
-
-static_dir = os.environ.get('NEPTYNE_DEV_DIR', os.path.dirname(__file__) or '.')
-
-app.add_routes([
-    web.static('/static/', static_dir, show_index=True, append_version=True),
-])
-
-@routes.get('/inotify')
-async def inotify_websocket(request):
-    print('request', request)
-    websocket = web.WebSocketResponse()
-    await websocket.prepare(request)
-
-    watcher = aionotify.Watcher()
-    watcher.watch(path=static_dir, flags=aionotify.Flags.CLOSE_WRITE)
-
-    loop = asyncio.get_event_loop()
-    await watcher.setup(loop)
-    while True:
-        event = await watcher.get_event()
-        # print(event)
-        await websocket.send_str(event.name)
-
-    watcher.close()
-    return websocket
+# app.add_routes([
+    # web.static('/static/', static_dir, show_index=True, append_version=True),
+# ])
 
 app.router.add_routes(routes)
 
-async def main():
+async def async_main():
     import sys
     if sys.argv[1:2] == ['test']:
         await document.test()
@@ -224,14 +164,14 @@ async def main():
 
         await runner.cleanup()
 
-def sync_main():
+def main():
     try:
-        asyncio.run(main())
+        asyncio.run(async_main())
     except Exception as e:
         import traceback as tb
         tb.print_exc()
         asyncio.run(document.close_documents())
 
 if __name__ == '__main__':
-    sync_main()
+    main()
 
